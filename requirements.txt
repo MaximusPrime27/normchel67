@@ -1,4 +1,7 @@
 aiogram==3.15.0
-openai>=2.0.0
-python-dotenv>=1.0.1
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
 Pillow>=10.4.0
+pytesseract>=0.3.13
+sympy>=1.13.3
+python-dotenv>=1.0.1

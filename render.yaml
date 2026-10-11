@@ -1,13 +1,13 @@
 services:
-  - type: worker
+  - type: web
     name: mathsolver-telegram-bot
     runtime: docker
-    plan: starter
+    plan: free
     autoDeploy: true
     envVars:
       - key: BOT_TOKEN
         sync: false
-      - key: OPENAI_API_KEY
+      - key: WEBHOOK_SECRET
         sync: false
-      - key: OPENAI_MODEL
-        value: gpt-5.5
+      - key: BASE_URL
+        sync: false

@@ -1,83 +1,50 @@
-# MathSolver Telegram Bot
+# MathSolver Telegram Bot FREE
 
-Telegram-бот для 9–11 классов:
+Полностью бесплатная версия без OpenAI API.
 
-- математика;
+Функции:
+- математика 9–11;
 - русский язык;
-- ОГЭ;
-- ЕГЭ;
-- решение по фото;
+- ОГЭ/ЕГЭ;
+- OCR фото на русском и английском;
 - выбор области фото;
-- память предыдущего решения;
-- OpenAI Responses API.
+- webhook для бесплатного Render Web Service.
 
-## 1. Создай Telegram-бота
+## Render
 
-В Telegram открой `@BotFather`.
+Создай **Web Service**, не Background Worker.
 
-Выполни:
+Runtime: Docker  
+Plan: Free
 
-```text
-/newbot
-```
-
-Сохрани токен.
-
-## 2. Получи OpenAI API key
-
-Создай API key в своей OpenAI API учётной записи.
-
-Не добавляй токены в исходный код и GitHub.
-
-## 3. Переменные окружения
-
-Нужны:
+Environment Variables:
 
 ```text
-BOT_TOKEN=...
-OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-5.5
+BOT_TOKEN=токен от BotFather
+WEBHOOK_SECRET=любая длинная случайная строка
+BASE_URL=https://ИМЯ-СЕРВИСА.onrender.com
 ```
 
-Если выбранная модель недоступна твоему API-проекту, замени `OPENAI_MODEL` на модель,
-которая доступна в твоём аккаунте и поддерживает изображения.
+После первого успешного Deploy Telegram webhook установится автоматически.
 
-## 4. Запуск локально
+## Проверка
 
-```bash
-pip install -r requirements.txt
-cp .env.example .env
-python -m bot.main
+Открой:
+
+```text
+https://ИМЯ-СЕРВИСА.onrender.com/health
 ```
 
-## 5. GitHub
+Должно показать:
 
-Загрузи ВСЕ файлы этого проекта в корень нового репозитория.
+```json
+{"ok":true}
+```
 
-Токены в GitHub не загружай.
+После этого отправь `/start` своему Telegram-боту.
 
-## 6. Render
+## Ограничение
 
-Создай Background Worker / Docker service из GitHub-репозитория.
-
-Добавь Environment Variables:
-
-- BOT_TOKEN
-- OPENAI_API_KEY
-- OPENAI_MODEL
-
-Команда запуска уже задана в Dockerfile.
-
-## Команды
-
-- `/start`
-- `/help`
-- `/clear`
-- `/mode`
-
-После решения пользователь может писать:
-- `почему?`
-- `объясни второй шаг`
-- `реши другим способом`
-
-Бот продолжит предыдущий контекст.
+Это локальный решатель без большой языковой модели. Он хорошо работает с
+выражениями, уравнениями, базовыми школьными формулами и встроенными правилами
+русского, но сложные произвольные текстовые задачи понимает хуже, чем ИИ.
