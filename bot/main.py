@@ -12,7 +12,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
 
 load_dotenv()
-APP_VERSION = "Stable V4 Plain"
+APP_VERSION = "Stable V5 Pro"
 BOT_TOKEN=os.getenv('BOT_TOKEN','').strip(); BASE_URL=os.getenv('BASE_URL','').strip().rstrip('/'); WEBHOOK_SECRET=os.getenv('WEBHOOK_SECRET','').strip(); GROQ_API_KEY=os.getenv('GROQ_API_KEY','').strip()
 TEXT_MODEL=os.getenv('GROQ_TEXT_MODEL','openai/gpt-oss-120b').strip(); VISION_MODEL=os.getenv('GROQ_VISION_MODEL','qwen/qwen3.8-27b').strip()
 TIMEOUT=float(os.getenv('REQUEST_TIMEOUT','55')); MAX_CONCURRENT=int(os.getenv('MAX_CONCURRENT_AI','4')); COOLDOWN=float(os.getenv('USER_COOLDOWN_SECONDS','1.2')); MAX_TOKENS=int(os.getenv('MAX_OUTPUT_TOKENS','2600'))
@@ -305,8 +305,13 @@ async def solve_image(uid,data,text):
 def limited(uid):
     now=time.monotonic(); yes=now-last[uid]<COOLDOWN; last[uid]=now; return yes
 
+
+@router.message(F.text == "▶️ Старт")
+async def start_button(message: Message):
+    await start(message)
+
 @router.message(CommandStart())
-async def start(m): await m.answer(f'📚 MathSolver Stable V4 Plain\n🤖 AI: {"✅" if groq else "❌"}\n🎒 Класс: {grade[m.from_user.id]}',reply_markup=MAIN)
+async def start(m): await m.answer(f'📚 MathSolver Stable V5 Pro\n🤖 AI: {"✅" if groq else "❌"}\n🎒 Класс: {grade[m.from_user.id]}',reply_markup=MAIN)
 @router.message(Command('status'))
 async def status(m):
     await m.answer(
@@ -361,7 +366,7 @@ async def text(m):
     await send_plain(m, await solve_text(m.from_user.id,m.text.strip()))
 
 @app.get('/')
-async def root(): return {'ok':True,'service':APP_VERSION,'ai_enabled':bool(groq),'text_model':TEXT_MODEL if groq else None,'vision_model':VISION_MODEL if groq else None}
+async def root(): return {'ok':True,'service': APP_VERSION,'ai_enabled':bool(groq),'text_model':TEXT_MODEL if groq else None,'vision_model':VISION_MODEL if groq else None}
 @app.get('/health')
 async def health(): return {'ok':True,'ai_enabled':bool(groq)}
 @app.get('/ready')

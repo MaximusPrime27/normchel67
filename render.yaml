@@ -26,3 +26,6 @@ services:
         value: "1.2"
       - key: MAX_OUTPUT_TOKENS
         value: "2600"
+
+      - key: DB_PATH
+        value: data/mathsolver.db
