@@ -9,10 +9,10 @@ from sympy import Eq, Symbol, diff, integrate, pi, simplify, solve, sqrt, E
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application, convert_xor
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
+from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update, Message
 
 load_dotenv()
-APP_VERSION = "Stable V5 Pro"
+APP_VERSION = "Stable V5.1 Fix"
 BOT_TOKEN=os.getenv('BOT_TOKEN','').strip(); BASE_URL=os.getenv('BASE_URL','').strip().rstrip('/'); WEBHOOK_SECRET=os.getenv('WEBHOOK_SECRET','').strip(); GROQ_API_KEY=os.getenv('GROQ_API_KEY','').strip()
 TEXT_MODEL=os.getenv('GROQ_TEXT_MODEL','openai/gpt-oss-120b').strip(); VISION_MODEL=os.getenv('GROQ_VISION_MODEL','qwen/qwen3.8-27b').strip()
 TIMEOUT=float(os.getenv('REQUEST_TIMEOUT','55')); MAX_CONCURRENT=int(os.getenv('MAX_CONCURRENT_AI','4')); COOLDOWN=float(os.getenv('USER_COOLDOWN_SECONDS','1.2')); MAX_TOKENS=int(os.getenv('MAX_OUTPUT_TOKENS','2600'))
@@ -20,12 +20,12 @@ if not BOT_TOKEN: raise RuntimeError('BOT_TOKEN is not set')
 if not BASE_URL: raise RuntimeError('BASE_URL is not set')
 if not WEBHOOK_SECRET: WEBHOOK_SECRET=secrets.token_urlsafe(32)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s'); log=logging.getLogger('mathsolver')
-bot=Bot(BOT_TOKEN); dp=Dispatcher(); router=Router(); dp.include_router(router); app=FastAPI(title='MathSolver Stable V3 Clean')
+bot=Bot(BOT_TOKEN); dp=Dispatcher(); router=Router(); dp.include_router(router); app=FastAPI(title='MathSolver Stable V5.1 Fix')
 groq=AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None; sem=asyncio.Semaphore(MAX_CONCURRENT)
 mode=defaultdict(lambda:'auto'); grade=defaultdict(lambda:11); photos={}; history=defaultdict(lambda:deque(maxlen=8)); last=defaultdict(float)
 x,y,z=Symbol('x'),Symbol('y'),Symbol('z'); TR=standard_transformations+(implicit_multiplication_application,convert_xor)
 
-MAIN=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text='🧮 Математика'),KeyboardButton(text='🇷🇺 Русский язык')],[KeyboardButton(text='🎓 ОГЭ'),KeyboardButton(text='🏆 ЕГЭ')],[KeyboardButton(text='📷 Решить по фото'),KeyboardButton(text='🤖 ИИ-режим')],[KeyboardButton(text='🎒 Выбрать класс'),KeyboardButton(text='📚 Темы')],[KeyboardButton(text='🧹 Сбросить контекст'),KeyboardButton(text='ℹ️ Помощь')]],resize_keyboard=True)
+MAIN=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text='▶️ Старт')],[KeyboardButton(text='🧮 Математика'),KeyboardButton(text='🇷🇺 Русский язык')],[KeyboardButton(text='🎓 ОГЭ'),KeyboardButton(text='🏆 ЕГЭ')],[KeyboardButton(text='📷 Решить по фото'),KeyboardButton(text='🤖 ИИ-режим')],[KeyboardButton(text='🎒 Выбрать класс'),KeyboardButton(text='📚 Темы')],[KeyboardButton(text='🧹 Сбросить контекст'),KeyboardButton(text='ℹ️ Помощь')]],resize_keyboard=True)
 CLASS=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='9 класс',callback_data='class:9'),InlineKeyboardButton(text='10 класс',callback_data='class:10'),InlineKeyboardButton(text='11 класс',callback_data='class:11')]])
 CROP=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='⬆ Верх',callback_data='crop:top'),InlineKeyboardButton(text='🎯 Центр',callback_data='crop:center'),InlineKeyboardButton(text='⬇ Низ',callback_data='crop:bottom')],[InlineKeyboardButton(text='⬅ Левая',callback_data='crop:left'),InlineKeyboardButton(text='➡ Правая',callback_data='crop:right')],[InlineKeyboardButton(text='🖼 Всё фото',callback_data='crop:full')]])
 PROMPT="""Ты MathSolver, учебный помощник 9–11 классов России.
@@ -307,11 +307,11 @@ def limited(uid):
 
 
 @router.message(F.text == "▶️ Старт")
-async def start_button(message: Message):
+async def start_button(message):
     await start(message)
 
 @router.message(CommandStart())
-async def start(m): await m.answer(f'📚 MathSolver Stable V5 Pro\n🤖 AI: {"✅" if groq else "❌"}\n🎒 Класс: {grade[m.from_user.id]}',reply_markup=MAIN)
+async def start(m): await m.answer(f'📚 MathSolver Stable V5.1 Fix\n🤖 AI: {"✅" if groq else "❌"}\n🎒 Класс: {grade[m.from_user.id]}',reply_markup=MAIN)
 @router.message(Command('status'))
 async def status(m):
     await m.answer(
