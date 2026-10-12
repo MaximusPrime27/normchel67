@@ -19,7 +19,7 @@ if not BOT_TOKEN: raise RuntimeError('BOT_TOKEN is not set')
 if not BASE_URL: raise RuntimeError('BASE_URL is not set')
 if not WEBHOOK_SECRET: WEBHOOK_SECRET=secrets.token_urlsafe(32)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s'); log=logging.getLogger('mathsolver')
-bot=Bot(BOT_TOKEN); dp=Dispatcher(); router=Router(); dp.include_router(router); app=FastAPI(title='MathSolver Stable V2')
+bot=Bot(BOT_TOKEN); dp=Dispatcher(); router=Router(); dp.include_router(router); app=FastAPI(title='MathSolver Stable V3 Clean')
 groq=AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None; sem=asyncio.Semaphore(MAX_CONCURRENT)
 mode=defaultdict(lambda:'auto'); grade=defaultdict(lambda:11); photos={}; history=defaultdict(lambda:deque(maxlen=8)); last=defaultdict(float)
 x,y,z=Symbol('x'),Symbol('y'),Symbol('z'); TR=standard_transformations+(implicit_multiplication_application,convert_xor)
@@ -27,7 +27,44 @@ x,y,z=Symbol('x'),Symbol('y'),Symbol('z'); TR=standard_transformations+(implicit
 MAIN=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text='🧮 Математика'),KeyboardButton(text='🇷🇺 Русский язык')],[KeyboardButton(text='🎓 ОГЭ'),KeyboardButton(text='🏆 ЕГЭ')],[KeyboardButton(text='📷 Решить по фото'),KeyboardButton(text='🤖 ИИ-режим')],[KeyboardButton(text='🎒 Выбрать класс'),KeyboardButton(text='📚 Темы')],[KeyboardButton(text='🧹 Сбросить контекст'),KeyboardButton(text='ℹ️ Помощь')]],resize_keyboard=True)
 CLASS=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='9 класс',callback_data='class:9'),InlineKeyboardButton(text='10 класс',callback_data='class:10'),InlineKeyboardButton(text='11 класс',callback_data='class:11')]])
 CROP=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='⬆ Верх',callback_data='crop:top'),InlineKeyboardButton(text='🎯 Центр',callback_data='crop:center'),InlineKeyboardButton(text='⬇ Низ',callback_data='crop:bottom')],[InlineKeyboardButton(text='⬅ Левая',callback_data='crop:left'),InlineKeyboardButton(text='➡ Правая',callback_data='crop:right')],[InlineKeyboardButton(text='🖼 Всё фото',callback_data='crop:full')]])
-PROMPT="""Ты MathSolver, учебный помощник 9–11 классов России. Математика: алгебра, уравнения и неравенства, системы, функции и графики, прогрессии, тригонометрия, производная, интеграл, планиметрия, стереометрия, координаты, векторы, вероятность, статистика, текстовые и экономические задачи, параметры, ОГЭ/ЕГЭ. Русский: орфоэпия, лексика, паронимы, морфемика, словообразование, орфография, Н/НН, НЕ/НИ, -ТСЯ/-ТЬСЯ, морфология, синтаксис, ССП/СПП/БСП, пунктуация, текст, стили речи, выразительные средства, сочинение, ОГЭ/ЕГЭ. Объясняй по шагам, используй точный результат SymPy если он передан, не выдумывай данные, для русского называй правило, для геометрии теоремы, для ОГЭ/ЕГЭ заканчивай строкой Ответ."""
+PROMPT="""Ты MathSolver, учебный помощник 9–11 классов России.
+
+Математика: алгебра, уравнения и неравенства, системы, функции и графики,
+прогрессии, тригонометрия, производная, интеграл, планиметрия, стереометрия,
+координаты, векторы, вероятность, статистика, текстовые и экономические задачи,
+параметры, ОГЭ/ЕГЭ.
+
+Русский: орфоэпия, лексика, паронимы, морфемика, словообразование, орфография,
+Н/НН, НЕ/НИ, -ТСЯ/-ТЬСЯ, морфология, синтаксис, ССП/СПП/БСП, пунктуация,
+текст, стили речи, выразительные средства, сочинение, ОГЭ/ЕГЭ.
+
+ФОРМАТ ОТВЕТА ДЛЯ TELEGRAM:
+- Только обычный читаемый текст.
+- НИКОГДА не используй Markdown-разметку: #, ##, ###, **, __, ``` и таблицы Markdown.
+- НИКОГДА не используй LaTeX: запрещены \frac, \sqrt, \cdot, \pm, \[, \], \(, \), $...$.
+- Пиши математические символы непосредственно: √, ², ³, ·, ÷, ±, ≤, ≥, ≠, π, Δ.
+- Дроби записывай как (числитель)/(знаменатель), например (5+√7)/4.
+- Степени желательно писать как x², x³; сложные степени допустимо x^(n+1).
+- Не пиши слова «Шаг 1», «Шаг 2» без необходимости.
+- Для обычной задачи формат:
+  Решение:
+  1. ...
+  2. ...
+  Ответ: ...
+- Для простого примера можно ещё короче: вычисление → ответ.
+- Для русского:
+  Правило:
+  ...
+  Разбор:
+  ...
+  Ответ: ...
+- Не повторяй условие целиком, если это не нужно.
+- Не растягивай ответ: достаточно, чтобы ученик понял ход решения.
+- Используй точный результат SymPy, если он передан.
+- Не выдумывай данные.
+- Для геометрии называй нужные теоремы.
+- Для ОГЭ/ЕГЭ обязательно заканчивай строкой «Ответ: ...».
+"""
 
 def split_text(t,n=3900):
     out=[]
@@ -35,6 +72,117 @@ def split_text(t,n=3900):
         k=t.rfind('\n',0,n); k=k if k>n//2 else n; out.append(t[:k]); t=t[k:].lstrip()
     if t: out.append(t)
     return out
+
+
+def clean_telegram_text(text):
+    """Convert common Markdown/LaTeX AI output into clean Telegram plain text."""
+    if not text:
+        return text
+
+    s = str(text).replace("\r\n", "\n").replace("\r", "\n")
+
+    # Code fences and markdown headings/emphasis.
+    s = re.sub(r"```[a-zA-Z0-9_-]*\n?", "", s)
+    s = s.replace("```", "")
+    s = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", s)
+    s = s.replace("**", "").replace("__", "").replace("~~", "")
+    s = re.sub(r"(?m)^\s*---+\s*$", "", s)
+
+    # Display/inline math delimiters.
+    for token in (r"\[", r"\]", r"\(", r"\)"):
+        s = s.replace(token, "")
+    s = s.replace("$", "")
+
+    # Common LaTeX operators and symbols.
+    latex_map = {
+        r"\cdot": "·",
+        r"\times": "×",
+        r"\div": "÷",
+        r"\pm": "±",
+        r"\mp": "∓",
+        r"\leq": "≤",
+        r"\le": "≤",
+        r"\geq": "≥",
+        r"\ge": "≥",
+        r"\neq": "≠",
+        r"\approx": "≈",
+        r"\pi": "π",
+        r"\Delta": "Δ",
+        r"\infty": "∞",
+        r"\rightarrow": "→",
+        r"\Rightarrow": "⇒",
+        r"\left": "",
+        r"\right": "",
+        r"\,": " ",
+        r"\;": " ",
+        r"\!": "",
+    }
+    for a, b in latex_map.items():
+        s = s.replace(a, b)
+
+    # Fractions. Repeat to handle several simple occurrences.
+    frac_pat = re.compile(r"\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}")
+    for _ in range(8):
+        new_s = frac_pat.sub(lambda m: f"({m.group(1)})/({m.group(2)})", s)
+        if new_s == s:
+            break
+        s = new_s
+
+    # Square roots.
+    sqrt_pat = re.compile(r"\\sqrt\s*\{([^{}]+)\}")
+    for _ in range(5):
+        new_s = sqrt_pat.sub(lambda m: f"√({m.group(1)})", s)
+        if new_s == s:
+            break
+        s = new_s
+
+    # Superscripts/subscripts for common digits.
+    super_map = str.maketrans("0123456789+-=()", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾")
+    sub_map = str.maketrans("0123456789+-=()", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎")
+    s = re.sub(
+        r"\^\{([0-9+\-=()]+)\}",
+        lambda m: m.group(1).translate(super_map),
+        s,
+    )
+    s = re.sub(
+        r"_\{([0-9+\-=(),]+)\}",
+        lambda m: m.group(1).translate(sub_map),
+        s,
+    )
+    s = re.sub(
+        r"\^([23])\b",
+        lambda m: {"2": "²", "3": "³"}[m.group(1)],
+        s,
+    )
+
+    # Other frequent LaTeX commands.
+    s = re.sub(r"\\text\s*\{([^{}]*)\}", r"\1", s)
+    s = re.sub(r"\\mathrm\s*\{([^{}]*)\}", r"\1", s)
+    s = re.sub(r"\\operatorname\s*\{([^{}]*)\}", r"\1", s)
+
+    # Any remaining braces are more readable without TeX grouping.
+    s = s.replace("{", "(").replace("}", ")")
+
+    # Remove leftover backslash before command-like fragments.
+    s = re.sub(r"\\([A-Za-z]+)", r"\1", s)
+
+    # Clean bullet markers generated by markdown, but keep readable list structure.
+    s = re.sub(r"(?m)^\s*[-*]\s+", "• ", s)
+
+    # Make common heading labels neat.
+    s = re.sub(r"(?mi)^\s*решение\s*:?\s*$", "Решение:", s)
+    s = re.sub(r"(?mi)^\s*ответ\s*:?\s*", "Ответ: ", s)
+    s = re.sub(r"(?mi)^\s*проверка\s*:?\s*$", "Проверка:", s)
+    s = re.sub(r"(?mi)^\s*правило\s*:?\s*$", "Правило:", s)
+    s = re.sub(r"(?mi)^\s*разбор\s*:?\s*$", "Разбор:", s)
+
+    # Remove excessive blank lines/spaces.
+    s = re.sub(r"[ \t]+\n", "\n", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    s = re.sub(r"[ \t]{2,}", " ", s)
+
+    return s.strip()
+
 
 def norm(s):
     s=s.replace('×','*').replace('·','*').replace('÷','/').replace('−','-').replace(',','.').replace('π','pi'); s=re.sub(r'√\s*\(([^)]+)\)',r'sqrt(\1)',s); s=re.sub(r'√\s*([0-9A-Za-z.]+)',r'sqrt(\1)',s); return s
@@ -112,21 +260,26 @@ async def ai_call(messages,model):
     return None
 
 async def solve_text(uid,text):
-    hint=exact_hint(text); context=list(history[uid]); p=f'Режим: {mode[uid]}. Класс: {grade[uid]}.\nЗадание: {text}'+(f'\nПроверенный локальный результат: {hint}' if hint else '')
+    hint=exact_hint(text); context=list(history[uid]); p=f'Режим: {mode[uid]}. Класс: {grade[uid]}. Формат: чистый текст Telegram, короткое понятное решение и ответ, без Markdown и LaTeX.\nЗадание: {text}'+(f'\nПроверенный локальный результат: {hint}' if hint else '')
     ans=await ai_call([{'role':'system','content':PROMPT}]+context+[{'role':'user','content':p}],TEXT_MODEL)
-    if ans: history[uid].append({'role':'user','content':text}); history[uid].append({'role':'assistant','content':ans}); return ans
-    if hint:return '🧮 '+hint+'\n\n⚠️ ИИ временно недоступен, показан локальный точный результат.'
+    if ans:
+        ans=clean_telegram_text(ans)
+        history[uid].append({'role':'user','content':text})
+        history[uid].append({'role':'assistant','content':ans})
+        return ans
+    if hint:return clean_telegram_text('🧮 '+hint+'\n\n⚠️ ИИ временно недоступен, показан локальный точный результат.')
     return '⚠️ ИИ временно недоступен. Попробуй ещё раз через несколько секунд.'
 
 async def solve_image(uid,data,text):
     b64=base64.b64encode(compress(data)).decode(); p=PROMPT+f'\nКласс: {grade[uid]}, режим: {mode[uid]}. Прочитай само фото. OCR ниже лишь подсказка и может ошибаться. Не выдумывай нечитабельные данные.\nOCR:\n{text or "(пусто)"}'
-    return await ai_call([{'role':'user','content':[{'type':'text','text':p},{'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{b64}'}}]}],VISION_MODEL)
+    ans=await ai_call([{'role':'user','content':[{'type':'text','text':p},{'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{b64}'}}]}],VISION_MODEL)
+    return clean_telegram_text(ans) if ans else None
 
 def limited(uid):
     now=time.monotonic(); yes=now-last[uid]<COOLDOWN; last[uid]=now; return yes
 
 @router.message(CommandStart())
-async def start(m): await m.answer(f'📚 MathSolver Stable V2\n🤖 AI: {"✅" if groq else "❌"}\n🎒 Класс: {grade[m.from_user.id]}',reply_markup=MAIN)
+async def start(m): await m.answer(f'📚 MathSolver Stable V3 Clean\n🤖 AI: {"✅" if groq else "❌"}\n🎒 Класс: {grade[m.from_user.id]}',reply_markup=MAIN)
 @router.message(Command('status'))
 async def status(m): await m.answer(f'🟢 Бот работает\nAI: {bool(groq)}\nКласс: {grade[m.from_user.id]}\nРежим: {mode[m.from_user.id]}\nКонтекст: {len(history[m.from_user.id])}')
 @router.message(Command('reset'))
@@ -173,7 +326,7 @@ async def text(m):
     for part in split_text(await solve_text(m.from_user.id,m.text.strip())): await m.answer(part)
 
 @app.get('/')
-async def root(): return {'ok':True,'service':'MathSolver Stable V2','ai_enabled':bool(groq),'text_model':TEXT_MODEL if groq else None,'vision_model':VISION_MODEL if groq else None}
+async def root(): return {'ok':True,'service':'MathSolver Stable V3 Clean','ai_enabled':bool(groq),'text_model':TEXT_MODEL if groq else None,'vision_model':VISION_MODEL if groq else None}
 @app.get('/health')
 async def health(): return {'ok':True,'ai_enabled':bool(groq)}
 @app.get('/ready')

@@ -1,5 +1,27 @@
-# MathSolver Stable V2
+# MathSolver Stable V3 Clean
 
-Добавлено: выбор класса, память контекста, /status, /reset, SymPy, улучшенный OCR, Groq Vision, fallback vision -> OCR -> text AI -> local math, retries, timeout, антиспам и Render health check.
+Версия с чистым выводом для Telegram.
 
-Обязательные ENV: BOT_TOKEN, WEBHOOK_SECRET, BASE_URL, GROQ_API_KEY.
+Главное исправление:
+- ИИ получает строгую инструкцию НЕ использовать Markdown и LaTeX.
+- Перед отправкой бот дополнительно очищает ответ.
+- `\frac{a}{b}` превращается в `(a)/(b)`.
+- `\sqrt{x}` превращается в `√(x)`.
+- `\cdot` → `·`, `\pm` → `±`.
+- `x^{2}` → `x²`.
+- удаляются `###`, `**`, `\[`, `\]`, code fences и другая техническая разметка.
+- ответы по умолчанию короче: `Решение → Ответ`.
+- работает и для текстовых задач, и для решения по фото.
+
+Переменные Render менять не нужно:
+BOT_TOKEN
+WEBHOOK_SECRET
+BASE_URL
+GROQ_API_KEY
+GROQ_TEXT_MODEL
+GROQ_VISION_MODEL
+
+После загрузки файлов в GitHub дождись нового Deploy и проверь:
+1. `/status`
+2. `2x² - 5x - 3 = 0`
+3. фото математической задачи
