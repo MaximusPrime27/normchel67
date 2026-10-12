@@ -1,50 +1,30 @@
-# MathSolver Telegram Bot FREE
+# MathSolver 9–11 + Groq
 
-Полностью бесплатная версия без OpenAI API.
+Telegram-бот для математики и русского языка 9–11 классов.
 
-Функции:
-- математика 9–11;
-- русский язык;
-- ОГЭ/ЕГЭ;
-- OCR фото на русском и английском;
-- выбор области фото;
-- webhook для бесплатного Render Web Service.
+## Возможности
+- программа 9–11 классов, ОГЭ/ЕГЭ;
+- SymPy для точных вычислений;
+- OpenCV + Tesseract для улучшенного OCR;
+- Groq AI для объяснений;
+- qwen/qwen3.8-27b для прямого анализа фото;
+- работает и без Groq API, но тогда сложные задачи ограничены.
 
-## Render
+## Render Environment
+Обязательные:
+BOT_TOKEN
+WEBHOOK_SECRET
+BASE_URL
 
-Создай **Web Service**, не Background Worker.
+Для ИИ:
+GROQ_API_KEY
+GROQ_TEXT_MODEL=openai/gpt-oss-120b
+GROQ_VISION_MODEL=qwen/qwen3.8-27b
 
-Runtime: Docker  
-Plan: Free
+После добавления ключа сделай Deploy latest commit.
 
-Environment Variables:
+Проверка:
+https://YOUR-SERVICE.onrender.com/health
 
-```text
-BOT_TOKEN=токен от BotFather
-WEBHOOK_SECRET=любая длинная случайная строка
-BASE_URL=https://ИМЯ-СЕРВИСА.onrender.com
-```
-
-После первого успешного Deploy Telegram webhook установится автоматически.
-
-## Проверка
-
-Открой:
-
-```text
-https://ИМЯ-СЕРВИСА.onrender.com/health
-```
-
-Должно показать:
-
-```json
-{"ok":true}
-```
-
-После этого отправь `/start` своему Telegram-боту.
-
-## Ограничение
-
-Это локальный решатель без большой языковой модели. Он хорошо работает с
-выражениями, уравнениями, базовыми школьными формулами и встроенными правилами
-русского, но сложные произвольные текстовые задачи понимает хуже, чем ИИ.
+С подключённым Groq должно быть:
+{"ok":true,"ai_enabled":true}

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: mathsolver-telegram-bot
+    name: mathsolverbot-groq
     runtime: docker
     plan: free
     autoDeploy: true
@@ -11,3 +11,9 @@ services:
         sync: false
       - key: BASE_URL
         sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_TEXT_MODEL
+        value: openai/gpt-oss-120b
+      - key: GROQ_VISION_MODEL
+        value: qwen/qwen3.8-27b
