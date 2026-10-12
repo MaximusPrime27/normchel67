@@ -12,6 +12,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
 
 load_dotenv()
+APP_VERSION = "Stable V4 Plain"
 BOT_TOKEN=os.getenv('BOT_TOKEN','').strip(); BASE_URL=os.getenv('BASE_URL','').strip().rstrip('/'); WEBHOOK_SECRET=os.getenv('WEBHOOK_SECRET','').strip(); GROQ_API_KEY=os.getenv('GROQ_API_KEY','').strip()
 TEXT_MODEL=os.getenv('GROQ_TEXT_MODEL','openai/gpt-oss-120b').strip(); VISION_MODEL=os.getenv('GROQ_VISION_MODEL','qwen/qwen3.8-27b').strip()
 TIMEOUT=float(os.getenv('REQUEST_TIMEOUT','55')); MAX_CONCURRENT=int(os.getenv('MAX_CONCURRENT_AI','4')); COOLDOWN=float(os.getenv('USER_COOLDOWN_SECONDS','1.2')); MAX_TOKENS=int(os.getenv('MAX_OUTPUT_TOKENS','2600'))
@@ -176,12 +177,38 @@ def clean_telegram_text(text):
     s = re.sub(r"(?mi)^\s*правило\s*:?\s*$", "Правило:", s)
     s = re.sub(r"(?mi)^\s*разбор\s*:?\s*$", "Разбор:", s)
 
+    # Common indexed variables: x_{1,2} -> x₁,₂ and x_1 -> x₁.
+    digit_sub = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
+    s = re.sub(
+        r"_\{([0-9,;]+)\}",
+        lambda m: "".join(ch.translate(digit_sub) if ch.isdigit() else ch for ch in m.group(1)),
+        s,
+    )
+    s = re.sub(
+        r"_([0-9])",
+        lambda m: m.group(1).translate(digit_sub),
+        s,
+    )
+
+    # Convert simple TeX commands that may remain after malformed model output.
+    s = s.replace("\\\\", "")
+    s = re.sub(r"(?m)^\s*#{1,6}\s*", "", s)
+
     # Remove excessive blank lines/spaces.
     s = re.sub(r"[ \t]+\n", "\n", s)
     s = re.sub(r"\n{3,}", "\n\n", s)
     s = re.sub(r"[ \t]{2,}", " ", s)
 
     return s.strip()
+
+
+async def send_plain(message, text):
+    """Absolute final output barrier: nothing reaches Telegram before cleanup."""
+    cleaned = clean_telegram_text(text or "")
+    if not cleaned:
+        cleaned = "Не удалось сформировать ответ."
+    for chunk in split_text(cleaned):
+        await message.answer(chunk)
 
 
 def norm(s):
@@ -279,9 +306,17 @@ def limited(uid):
     now=time.monotonic(); yes=now-last[uid]<COOLDOWN; last[uid]=now; return yes
 
 @router.message(CommandStart())
-async def start(m): await m.answer(f'📚 MathSolver Stable V3 Clean\n🤖 AI: {"✅" if groq else "❌"}\n🎒 Класс: {grade[m.from_user.id]}',reply_markup=MAIN)
+async def start(m): await m.answer(f'📚 MathSolver Stable V4 Plain\n🤖 AI: {"✅" if groq else "❌"}\n🎒 Класс: {grade[m.from_user.id]}',reply_markup=MAIN)
 @router.message(Command('status'))
-async def status(m): await m.answer(f'🟢 Бот работает\nAI: {bool(groq)}\nКласс: {grade[m.from_user.id]}\nРежим: {mode[m.from_user.id]}\nКонтекст: {len(history[m.from_user.id])}')
+async def status(m):
+    await m.answer(
+        f'🟢 Бот работает\n'
+        f'Версия: {APP_VERSION}\n'
+        f'AI: {bool(groq)}\n'
+        f'Класс: {grade[m.from_user.id]}\n'
+        f'Режим: {mode[m.from_user.id]}\n'
+        f'Контекст: {len(history[m.from_user.id])}'
+    )
 @router.message(Command('reset'))
 @router.message(F.text=='🧹 Сбросить контекст')
 async def reset(m): history[m.from_user.id].clear(); photos.pop(m.from_user.id,None); await m.answer('🧹 Контекст очищен.')
@@ -317,16 +352,16 @@ async def crop_cb(c):
     if not data:await c.answer('Фото не найдено',show_alert=True); return
     d=crop(data,c.data.split(':')[1]); await c.answer('Решаю…'); text=await asyncio.to_thread(ocr,d); ans=await solve_image(uid,d,text)
     if not ans and text: ans=await solve_text(uid,text)
-    if text: await c.message.answer('🔎 OCR:\n'+text[:1800])
-    for part in split_text(ans or 'Не удалось прочитать фото. Попробуй более чёткий снимок.'): await c.message.answer(part)
+    if text: await send_plain(c.message, '🔎 Распознано:\n' + text[:1800])
+    await send_plain(c.message, ans or 'Не удалось прочитать фото. Попробуй более чёткий снимок.')
 @router.message(F.text)
 async def text(m):
     if m.text.startswith('/'):return
     if limited(m.from_user.id):await m.answer('⏳ Подожди секунду.'); return
-    for part in split_text(await solve_text(m.from_user.id,m.text.strip())): await m.answer(part)
+    await send_plain(m, await solve_text(m.from_user.id,m.text.strip()))
 
 @app.get('/')
-async def root(): return {'ok':True,'service':'MathSolver Stable V3 Clean','ai_enabled':bool(groq),'text_model':TEXT_MODEL if groq else None,'vision_model':VISION_MODEL if groq else None}
+async def root(): return {'ok':True,'service':APP_VERSION,'ai_enabled':bool(groq),'text_model':TEXT_MODEL if groq else None,'vision_model':VISION_MODEL if groq else None}
 @app.get('/health')
 async def health(): return {'ok':True,'ai_enabled':bool(groq)}
 @app.get('/ready')
