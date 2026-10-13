@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: mathsolver-stable-v2
+    name: mathsolver-v6
     runtime: docker
     plan: free
     autoDeploy: true
@@ -18,14 +18,25 @@ services:
         value: openai/gpt-oss-120b
       - key: GROQ_VISION_MODEL
         value: qwen/qwen3.8-27b
+      - key: DATABASE_URL
+        value: sqlite:///data/mathsolver.db
+      - key: FALLBACK_API_BASE
+        sync: false
+      - key: FALLBACK_API_KEY
+        sync: false
+      - key: FALLBACK_MODEL
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
       - key: REQUEST_TIMEOUT
         value: "55"
       - key: MAX_CONCURRENT_AI
         value: "4"
       - key: USER_COOLDOWN_SECONDS
         value: "1.2"
+      - key: MAX_HISTORY_MESSAGES
+        value: "8"
       - key: MAX_OUTPUT_TOKENS
         value: "2600"
-
-      - key: DB_PATH
-        value: data/mathsolver.db
+      - key: MAX_IMAGE_MB
+        value: "7"
