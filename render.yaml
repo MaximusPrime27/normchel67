@@ -40,3 +40,8 @@ services:
         value: "2600"
       - key: MAX_IMAGE_MB
         value: "7"
+
+      - key: ADMIN_WEB_USER
+        value: admin
+      - key: ADMIN_WEB_PASSWORD
+        sync: false

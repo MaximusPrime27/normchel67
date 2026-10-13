@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import hashlib
+import html
 import io
 import json
 import logging
@@ -19,7 +20,9 @@ import numpy as np
 import pytesseract
 from PIL import Image
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Form, Depends
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from groq import AsyncGroq, APIConnectionError, APIStatusError, RateLimitError
 from sqlalchemy import (
     Boolean, Column, DateTime, Integer, String, Text, create_engine, delete,
@@ -49,7 +52,7 @@ from aiogram.types import (
 
 load_dotenv()
 
-APP_VERSION = "V6 Ultimate"
+APP_VERSION = "V7 Admin Pro"
 
 # -----------------------------
 # CONFIG
@@ -73,6 +76,9 @@ ADMIN_IDS = {
     int(v) for v in os.getenv("ADMIN_IDS", "").split(",")
     if v.strip().isdigit()
 }
+
+ADMIN_WEB_USER = os.getenv("ADMIN_WEB_USER", "admin").strip()
+ADMIN_WEB_PASSWORD = os.getenv("ADMIN_WEB_PASSWORD", "").strip()
 
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "55"))
 MAX_CONCURRENT_AI = int(os.getenv("MAX_CONCURRENT_AI", "4"))
@@ -152,6 +158,39 @@ class CacheEntry(Base):
     __tablename__ = "cache"
     key = Column(String(64), primary_key=True)
     value = Column(Text, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class TopicProgress(Base):
+    __tablename__ = "topic_progress"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    subject = Column(String(16), nullable=False)
+    topic = Column(String(160), nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    correct = Column(Integer, nullable=False, default=0)
+    wrong = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+class ErrorLog(Base):
+    __tablename__ = "error_log"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, index=True, nullable=True)
+    source = Column(String(64), nullable=False)
+    error_type = Column(String(128), nullable=False)
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+class ExamSession(Base):
+    __tablename__ = "exam_sessions"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    exam_type = Column(String(16), nullable=False)
+    subject = Column(String(16), nullable=False)
+    score = Column(Integer, nullable=False, default=0)
+    max_score = Column(Integer, nullable=False, default=0)
+    completed = Column(Boolean, nullable=False, default=False)
+    payload = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
 def init_db():
@@ -267,6 +306,75 @@ def cache_put(key: str, value: str):
             s.add(CacheEntry(key=key, value=value[:16000]))
         s.commit()
 
+
+def log_error(user_id: Optional[int], source: str, exc: Exception):
+    try:
+        with SessionLocal() as s:
+            s.add(ErrorLog(
+                user_id=user_id,
+                source=source[:64],
+                error_type=type(exc).__name__[:128],
+                message=str(exc)[:4000],
+            ))
+            s.commit()
+    except Exception:
+        log.exception("Failed to persist error log")
+
+def update_topic_progress(uid: int, subject: str, topic: str, correct: bool):
+    with SessionLocal() as s:
+        row = s.execute(
+            select(TopicProgress).where(
+                TopicProgress.user_id == uid,
+                TopicProgress.subject == subject,
+                TopicProgress.topic == topic,
+            )
+        ).scalar_one_or_none()
+        if not row:
+            row = TopicProgress(
+                user_id=uid, subject=subject, topic=topic,
+                attempts=0, correct=0, wrong=0
+            )
+            s.add(row)
+        row.attempts += 1
+        if correct:
+            row.correct += 1
+        else:
+            row.wrong += 1
+        s.commit()
+
+def weak_topics(uid: int, limit: int = 5):
+    with SessionLocal() as s:
+        rows = s.execute(
+            select(TopicProgress)
+            .where(TopicProgress.user_id == uid, TopicProgress.attempts > 0)
+        ).scalars().all()
+    rows.sort(key=lambda r: (r.correct / max(r.attempts, 1), -r.attempts))
+    return rows[:limit]
+
+def create_exam_session(uid: int, exam_type: str, subject: str, payload: dict, max_score: int):
+    with SessionLocal() as s:
+        row = ExamSession(
+            user_id=uid,
+            exam_type=exam_type,
+            subject=subject,
+            score=0,
+            max_score=max_score,
+            completed=False,
+            payload=json.dumps(payload, ensure_ascii=False),
+        )
+        s.add(row)
+        s.commit()
+        s.refresh(row)
+        return row.id
+
+def finish_exam_session(session_id: int, score: int):
+    with SessionLocal() as s:
+        row = s.get(ExamSession, session_id)
+        if row:
+            row.score = score
+            row.completed = True
+            s.commit()
+
 # -----------------------------
 # TELEGRAM / AI
 # -----------------------------
@@ -299,11 +407,27 @@ MAIN_KB = ReplyKeyboardMarkup(
         [KeyboardButton(text="🎓 ОГЭ"), KeyboardButton(text="🏆 ЕГЭ")],
         [KeyboardButton(text="📷 Решить по фото"), KeyboardButton(text="✅ Проверить решение")],
         [KeyboardButton(text="📖 Учиться"), KeyboardButton(text="📝 Тренировка")],
+        [KeyboardButton(text="🧪 Вариант ОГЭ/ЕГЭ"), KeyboardButton(text="📉 Слабые темы")],
         [KeyboardButton(text="🎒 Выбрать класс"), KeyboardButton(text="👤 Профиль")],
         [KeyboardButton(text="⭐ Избранное"), KeyboardButton(text="📚 История")],
         [KeyboardButton(text="🧹 Сбросить контекст"), KeyboardButton(text="ℹ️ Помощь")],
     ],
     resize_keyboard=True,
+)
+
+
+EXAM_TYPE_KB = InlineKeyboardMarkup(
+    inline_keyboard=[[
+        InlineKeyboardButton(text="🎓 ОГЭ", callback_data="examtype:oge"),
+        InlineKeyboardButton(text="🏆 ЕГЭ", callback_data="examtype:ege"),
+    ]]
+)
+
+EXAM_SUBJECT_KB = InlineKeyboardMarkup(
+    inline_keyboard=[[
+        InlineKeyboardButton(text="🧮 Математика", callback_data="examsubject:math"),
+        InlineKeyboardButton(text="🇷🇺 Русский", callback_data="examsubject:rus"),
+    ]]
 )
 
 CLASS_KB = InlineKeyboardMarkup(
@@ -697,7 +821,7 @@ async def fallback_chat(messages: List[dict]) -> Optional[str]:
         data = r.json()
         return data["choices"][0]["message"]["content"]
 
-async def ai_chat(messages: List[dict], model: Optional[str] = None) -> str:
+async def ai_chat(messages: List[dict], model: Optional[str] = None, clean_output: bool = True) -> str:
     errors = []
     async with ai_semaphore:
         if groq:
@@ -716,7 +840,7 @@ async def ai_chat(messages: List[dict], model: Optional[str] = None) -> str:
                     )
                     text = response.choices[0].message.content or ""
                     if text.strip():
-                        return clean_text(text)
+                        return clean_text(text) if clean_output else text
                 except (RateLimitError, APIConnectionError, asyncio.TimeoutError) as e:
                     errors.append(type(e).__name__)
                 except APIStatusError as e:
@@ -730,7 +854,7 @@ async def ai_chat(messages: List[dict], model: Optional[str] = None) -> str:
         try:
             fallback = await fallback_chat(messages)
             if fallback:
-                return clean_text(fallback)
+                return clean_text(fallback) if clean_output else fallback
         except Exception as e:
             errors.append(f"fallback:{type(e).__name__}")
 
@@ -773,8 +897,9 @@ async def solve_text(uid: int, text: str, use_history: bool = True) -> str:
         bump_stat(uid, "solved")
         cache_put(key, answer)
         return answer
-    except Exception:
+    except Exception as e:
         bump_stat(uid, "ai_errors")
+        log_error(uid, "solve_text", e)
         log.exception("solve_text failed")
         if hint:
             return "Решение:\n" + clean_text(hint) + "\n\nОтвет: см. точный результат выше."
@@ -815,11 +940,98 @@ async def solve_image(uid: int, data: bytes, ocr: str, check_solution: bool = Fa
         answer = await ai_chat(messages, model=GROQ_VISION_MODEL)
         bump_stat(uid, "photos")
         return answer
-    except Exception:
+    except Exception as e:
         bump_stat(uid, "ai_errors")
+        log_error(uid, "solve_image", e)
         if ocr:
             return await solve_text(uid, ocr, use_history=False)
         return "Не удалось проанализировать изображение. Попробуй более чёткое фото."
+
+
+async def generate_exam_variant(uid: int, exam_type: str, subject: str):
+    grade = get_state(uid).grade
+    count = 6 if exam_type == "oge" else 8
+    prompt = (
+        f"Создай тренировочный вариант {exam_type.upper()} по "
+        f"{'математике' if subject == 'math' else 'русскому языку'} "
+        f"для ученика {grade} класса.\n"
+        f"Нужно {count} заданий разной сложности.\n"
+        "Верни строго JSON-массив объектов без Markdown:\n"
+        '[{"n":1,"task":"...","answer":"...","points":1,"topic":"..."}, ...]\n'
+        "Не добавляй текст вне JSON."
+    )
+    raw = await ai_chat([
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ], clean_output=False)
+    cleaned = raw.strip()
+    cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
+    cleaned = re.sub(r"```$", "", cleaned).strip()
+    data = json.loads(cleaned)
+    if not isinstance(data, list) or not data:
+        raise ValueError("invalid exam payload")
+    for i, item in enumerate(data, 1):
+        item.setdefault("n", i)
+        item.setdefault("points", 1)
+        item.setdefault("topic", "Общая тема")
+    return data
+
+def format_exam_variant(items: List[dict], exam_type: str, subject: str) -> str:
+    lines = [
+        f"🧪 Тренировочный вариант {exam_type.upper()}",
+        f"Предмет: {'математика' if subject == 'math' else 'русский язык'}",
+        "",
+    ]
+    for item in items:
+        lines.append(f"{item['n']}. {item['task']}  [{item.get('points',1)} б.]")
+        lines.append("")
+    lines.append("Отправь ответы одной строкой, например:")
+    lines.append("1) 4; 2) 17; 3) А; ...")
+    return "\n".join(lines)
+
+async def check_exam_answers(uid: int, payload: dict, user_text: str) -> str:
+    items = payload.get("items", [])
+    exam_type = payload.get("exam_type", "oge")
+    subject = payload.get("subject", "math")
+    max_score = sum(int(i.get("points", 1)) for i in items)
+    prompt = (
+        "Проверь ответы ученика по тренировочному варианту. "
+        "Сравни с эталонными ответами. "
+        "Верни строго JSON без Markdown:\n"
+        '{"score":0,"results":[{"n":1,"correct":true,"comment":"..."}]}\n\n'
+        "Задания и эталоны:\n" + json.dumps(items, ensure_ascii=False) +
+        "\n\nОтветы ученика:\n" + user_text
+    )
+    raw = await ai_chat([
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ], clean_output=False)
+    cleaned = re.sub(r"^```(?:json)?", "", raw.strip()).strip()
+    cleaned = re.sub(r"```$", "", cleaned).strip()
+    result = json.loads(cleaned)
+    score = int(result.get("score", 0))
+    score = max(0, min(score, max_score))
+
+    lines = [
+        f"Результат: {score}/{max_score} баллов",
+        "",
+    ]
+    for r in result.get("results", []):
+        mark = "✅" if r.get("correct") else "❌"
+        lines.append(f"{mark} №{r.get('n')}: {r.get('comment','')}")
+        # update weak-topic stats
+        try:
+            item = next(i for i in items if int(i.get("n")) == int(r.get("n")))
+            update_topic_progress(
+                uid,
+                subject,
+                item.get("topic", "Общая тема"),
+                bool(r.get("correct")),
+            )
+        except Exception:
+            pass
+    return "\n".join(lines), score, max_score
+
 
 # -----------------------------
 # COMMON ACTIONS
@@ -912,6 +1124,8 @@ async def help_cmd(message: Message):
         "• давать похожие задачи;\n"
         "• проверять твой ответ;\n"
         "• проводить мини-уроки и тренировки;\n"
+        "• создавать варианты ОГЭ/ЕГЭ с баллами;\n"
+        "• показывать слабые темы;\n"
         "• хранить профиль, историю и избранное.\n\n"
         "Команды: /status, /version, /reset, /profile"
     )
@@ -978,6 +1192,15 @@ async def profile(message: Message):
         f"Ошибочных ответов: {stat.wrong_checks}\n"
         f"Избранных задач: {fav_count}"
     )
+    weak = weak_topics(uid, 3)
+    if weak:
+        await message.answer(
+            "📉 Слабые темы:\n" +
+            "\n".join(
+                f"• {r.topic}: {round(100*r.correct/max(r.attempts,1))}%"
+                for r in weak
+            )
+        )
 
 @router.message(F.text == "📚 История")
 async def history_handler(message: Message):
@@ -1078,6 +1301,72 @@ async def train_topic_callback(callback: CallbackQuery):
         f"📝 Тренировка: {topic}\n\n{task}\n\n"
         "Отправь свой ответ обычным сообщением."
     )
+
+
+@router.message(F.text == "📉 Слабые темы")
+async def weak_topics_handler(message: Message):
+    rows = weak_topics(message.from_user.id, 6)
+    if not rows:
+        await message.answer(
+            "📉 Пока недостаточно данных. Пройди несколько тренировок "
+            "или вариантов ОГЭ/ЕГЭ."
+        )
+        return
+    lines = ["📉 Темы, которые стоит повторить:", ""]
+    for r in rows:
+        accuracy = round(100 * r.correct / max(r.attempts, 1))
+        lines.append(
+            f"• {r.topic} — {accuracy}% верных "
+            f"({r.correct}/{r.attempts})"
+        )
+    await message.answer("\n".join(lines))
+
+@router.message(F.text == "🧪 Вариант ОГЭ/ЕГЭ")
+async def exam_menu(message: Message):
+    set_pending(message.from_user.id, "choose_exam_type")
+    await message.answer("Выбери экзамен:", reply_markup=EXAM_TYPE_KB)
+
+@router.callback_query(F.data.startswith("examtype:"))
+async def exam_type_callback(callback: CallbackQuery):
+    exam_type = callback.data.split(":")[1]
+    set_pending(callback.from_user.id, "choose_exam_subject", {"exam_type": exam_type})
+    await callback.answer()
+    await callback.message.answer("Выбери предмет:", reply_markup=EXAM_SUBJECT_KB)
+
+@router.callback_query(F.data.startswith("examsubject:"))
+async def exam_subject_callback(callback: CallbackQuery):
+    uid = callback.from_user.id
+    subject = callback.data.split(":")[1]
+    pending, payload = get_pending(uid)
+    if pending != "choose_exam_subject":
+        await callback.answer("Сначала выбери экзамен.", show_alert=True)
+        return
+    exam_type = payload.get("exam_type", "oge")
+    await callback.answer("Генерирую вариант…")
+    try:
+        items = await generate_exam_variant(uid, exam_type, subject)
+        max_score = sum(int(i.get("points", 1)) for i in items)
+        session_id = create_exam_session(
+            uid, exam_type, subject,
+            {"items": items, "exam_type": exam_type, "subject": subject},
+            max_score,
+        )
+        set_pending(uid, "exam_answers", {
+            "session_id": session_id,
+            "items": items,
+            "exam_type": exam_type,
+            "subject": subject,
+        })
+        await send_plain(
+            callback.message,
+            format_exam_variant(items, exam_type, subject)
+        )
+    except Exception as e:
+        log_error(uid, "generate_exam_variant", e)
+        await callback.message.answer(
+            "Не удалось создать вариант. Попробуй ещё раз через несколько секунд."
+        )
+
 
 # -----------------------------
 # PHOTO / HOMEWORK CHECK
@@ -1219,6 +1508,7 @@ async def text_handler(message: Message):
     if text in {
         "▶️ Старт", "🧮 Математика", "🇷🇺 Русский язык", "🎓 ОГЭ", "🏆 ЕГЭ",
         "📷 Решить по фото", "✅ Проверить решение", "📖 Учиться", "📝 Тренировка",
+        "🧪 Вариант ОГЭ/ЕГЭ", "📉 Слабые темы",
         "🎒 Выбрать класс", "👤 Профиль", "⭐ Избранное", "📚 История",
         "🧹 Сбросить контекст", "ℹ️ Помощь"
     }:
@@ -1229,14 +1519,33 @@ async def text_handler(message: Message):
 
     pending, payload = get_pending(uid)
 
+    if pending == "exam_answers":
+        try:
+            result_text, score, max_score = await check_exam_answers(uid, payload, text)
+            finish_exam_session(int(payload.get("session_id")), score)
+            set_pending(uid, None)
+            await send_plain(message, result_text)
+        except Exception as e:
+            log_error(uid, "check_exam_answers", e)
+            await message.answer("Не удалось проверить вариант. Попробуй ещё раз.")
+        return
+
     if pending == "training_answer":
         try:
             result = await check_student_answer(uid, payload, text)
             low = result.lower()
-            if "верно" in low and "неверно" not in low and "ошиб" not in low:
+            is_correct = "верно" in low and "неверно" not in low and "ошиб" not in low
+            if is_correct:
                 bump_stat(uid, "correct_checks")
             else:
                 bump_stat(uid, "wrong_checks")
+            if payload.get("topic"):
+                update_topic_progress(
+                    uid,
+                    payload.get("subject", "math"),
+                    payload.get("topic", "Общая тема"),
+                    is_correct,
+                )
             set_pending(uid, None)
             await send_plain(message, result)
         except Exception:
@@ -1283,6 +1592,168 @@ async def admin_cmd(message: Message):
         f"AI-сбоев: {errors}"
     )
 
+
+# -----------------------------
+# WEB ADMIN
+# -----------------------------
+security = HTTPBasic()
+
+def require_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    if not ADMIN_WEB_PASSWORD:
+        raise HTTPException(status_code=503, detail="ADMIN_WEB_PASSWORD is not configured")
+    good_user = secrets.compare_digest(credentials.username, ADMIN_WEB_USER)
+    good_pass = secrets.compare_digest(credentials.password, ADMIN_WEB_PASSWORD)
+    if not (good_user and good_pass):
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return True
+
+ADMIN_CSS = """
+<style>
+body{font-family:Inter,Arial,sans-serif;background:#0f172a;color:#e5e7eb;margin:0}
+.wrap{max-width:1180px;margin:auto;padding:24px}
+h1,h2{margin:0 0 16px}
+nav{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 24px}
+nav a{color:#e5e7eb;text-decoration:none;background:#1e293b;padding:10px 14px;border-radius:10px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px}
+.card{background:#111827;border:1px solid #334155;border-radius:14px;padding:18px}
+.big{font-size:28px;font-weight:700}
+table{width:100%;border-collapse:collapse;background:#111827;border-radius:12px;overflow:hidden}
+th,td{text-align:left;padding:10px;border-bottom:1px solid #263244;vertical-align:top}
+th{background:#1e293b}
+small,.muted{color:#94a3b8}
+.ok{color:#86efac}.bad{color:#fca5a5}
+a{color:#93c5fd}
+</style>
+"""
+
+def admin_page(title: str, body: str) -> str:
+    return f"""<!doctype html><html><head><meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width,initial-scale=1'>
+    <title>{title}</title>{ADMIN_CSS}</head><body><div class='wrap'>
+    <h1>MathSolver — {title}</h1>
+    <nav>
+      <a href='/admin'>Обзор</a>
+      <a href='/admin/users'>Пользователи</a>
+      <a href='/admin/errors'>Ошибки</a>
+      <a href='/admin/topics'>Темы</a>
+      <a href='/admin/exams'>Экзамены</a>
+    </nav>{body}</div></body></html>"""
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(_: bool = Depends(require_admin)):
+    with SessionLocal() as s:
+        users = s.execute(select(func.count(UserState.user_id))).scalar_one()
+        solved = s.execute(select(func.sum(Stat.solved))).scalar() or 0
+        photos = s.execute(select(func.sum(Stat.photos))).scalar() or 0
+        errors = s.execute(select(func.count(ErrorLog.id))).scalar_one()
+        exams = s.execute(select(func.count(ExamSession.id))).scalar_one()
+        completed = s.execute(
+            select(func.count(ExamSession.id)).where(ExamSession.completed == True)
+        ).scalar_one()
+    body = f"""
+    <div class='cards'>
+      <div class='card'><div class='muted'>Пользователи</div><div class='big'>{users}</div></div>
+      <div class='card'><div class='muted'>Решено задач</div><div class='big'>{solved}</div></div>
+      <div class='card'><div class='muted'>Фото</div><div class='big'>{photos}</div></div>
+      <div class='card'><div class='muted'>Ошибки</div><div class='big'>{errors}</div></div>
+      <div class='card'><div class='muted'>Варианты</div><div class='big'>{completed}/{exams}</div></div>
+      <div class='card'><div class='muted'>Версия</div><div class='big'>{APP_VERSION}</div></div>
+    </div>
+    <div class='card'>
+      <b>Состояние:</b>
+      Groq: <span class='{"ok" if groq else "bad"}'>{"ON" if groq else "OFF"}</span> ·
+      Fallback: <span class='{"ok" if FALLBACK_API_KEY else "muted"}'>{"ON" if FALLBACK_API_KEY else "OFF"}</span> ·
+      DB: {"PostgreSQL" if DATABASE_URL.startswith(("postgres", "postgresql")) else "SQLite"}
+    </div>
+    """
+    return HTMLResponse(admin_page("Админка", body))
+
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_users(_: bool = Depends(require_admin)):
+    with SessionLocal() as s:
+        rows = s.execute(
+            select(UserState, Stat)
+            .join(Stat, Stat.user_id == UserState.user_id)
+            .order_by(UserState.user_id.desc())
+            .limit(300)
+        ).all()
+    tr = []
+    for st, stat in rows:
+        tr.append(
+            f"<tr><td>{st.user_id}</td><td>{st.grade}</td><td>{st.mode}</td>"
+            f"<td>{stat.solved}</td><td>{stat.photos}</td>"
+            f"<td>{stat.correct_checks}</td><td>{stat.wrong_checks}</td>"
+            f"<td>{stat.ai_errors}</td></tr>"
+        )
+    body = """<table><tr><th>User ID</th><th>Класс</th><th>Режим</th>
+    <th>Решено</th><th>Фото</th><th>Верно</th><th>Ошибки ученика</th><th>AI-сбои</th></tr>""" + "".join(tr) + "</table>"
+    return HTMLResponse(admin_page("Пользователи", body))
+
+@app.get("/admin/errors", response_class=HTMLResponse)
+async def admin_errors(_: bool = Depends(require_admin)):
+    with SessionLocal() as s:
+        rows = s.execute(
+            select(ErrorLog).order_by(ErrorLog.id.desc()).limit(250)
+        ).scalars().all()
+    tr = []
+    for e in rows:
+        tr.append(
+            f"<tr><td>{e.id}</td><td>{e.user_id or ''}</td><td>{e.source}</td>"
+            f"<td>{html.escape(str(e.error_type))}</td><td>{html.escape(clean_text(e.message)[:500])}</td>"
+            f"<td>{e.created_at or ''}</td></tr>"
+        )
+    body = """<table><tr><th>ID</th><th>User</th><th>Источник</th>
+    <th>Тип</th><th>Сообщение</th><th>Время</th></tr>""" + "".join(tr) + "</table>"
+    return HTMLResponse(admin_page("Ошибки", body))
+
+@app.get("/admin/topics", response_class=HTMLResponse)
+async def admin_topics(_: bool = Depends(require_admin)):
+    with SessionLocal() as s:
+        rows = s.execute(
+            select(
+                TopicProgress.subject,
+                TopicProgress.topic,
+                func.sum(TopicProgress.attempts),
+                func.sum(TopicProgress.correct),
+                func.sum(TopicProgress.wrong),
+            )
+            .group_by(TopicProgress.subject, TopicProgress.topic)
+            .order_by(func.sum(TopicProgress.attempts).desc())
+            .limit(200)
+        ).all()
+    tr = []
+    for subject, topic, attempts, correct, wrong in rows:
+        accuracy = round(100 * (correct or 0) / max(attempts or 1, 1))
+        tr.append(
+            f"<tr><td>{html.escape(str(subject))}</td><td>{html.escape(str(topic))}</td><td>{attempts}</td>"
+            f"<td>{correct}</td><td>{wrong}</td><td>{accuracy}%</td></tr>"
+        )
+    body = """<table><tr><th>Предмет</th><th>Тема</th><th>Попытки</th>
+    <th>Верно</th><th>Ошибки</th><th>Точность</th></tr>""" + "".join(tr) + "</table>"
+    return HTMLResponse(admin_page("Темы", body))
+
+@app.get("/admin/exams", response_class=HTMLResponse)
+async def admin_exams(_: bool = Depends(require_admin)):
+    with SessionLocal() as s:
+        rows = s.execute(
+            select(ExamSession).order_by(ExamSession.id.desc()).limit(250)
+        ).scalars().all()
+    tr = []
+    for e in rows:
+        tr.append(
+            f"<tr><td>{e.id}</td><td>{e.user_id}</td><td>{e.exam_type.upper()}</td>"
+            f"<td>{e.subject}</td><td>{e.score}/{e.max_score}</td>"
+            f"<td>{'да' if e.completed else 'нет'}</td><td>{e.created_at or ''}</td></tr>"
+        )
+    body = """<table><tr><th>ID</th><th>User</th><th>Экзамен</th>
+    <th>Предмет</th><th>Баллы</th><th>Завершён</th><th>Время</th></tr>""" + "".join(tr) + "</table>"
+    return HTMLResponse(admin_page("Экзамены", body))
+
+
 # -----------------------------
 # HEALTH / WEBHOOK
 # -----------------------------
@@ -1294,7 +1765,7 @@ async def root():
         "ai_enabled": bool(groq or FALLBACK_API_KEY),
         "groq_enabled": bool(groq),
         "fallback_enabled": bool(FALLBACK_API_KEY),
-        "database": "postgres" if DATABASE_URL.startswith("postgres") else "sqlite",
+        "database": "postgres" if DATABASE_URL.startswith(("postgres", "postgresql")) else "sqlite",
     }
 
 @app.get("/health")
@@ -1310,6 +1781,8 @@ async def health():
         "version": APP_VERSION,
         "ai_enabled": bool(groq or FALLBACK_API_KEY),
         "database_ok": db_ok,
+        "database": "postgres" if DATABASE_URL.startswith(("postgres", "postgresql")) else "sqlite",
+        "admin_enabled": bool(ADMIN_WEB_PASSWORD),
     }
 
 @app.get("/ready")
