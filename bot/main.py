@@ -55,7 +55,7 @@ from aiogram.types import (
 
 load_dotenv()
 
-APP_VERSION = "V10.1 Literature"
+APP_VERSION = "V10.2 Fast Photo"
 
 # -----------------------------
 # CONFIG
@@ -100,6 +100,8 @@ USER_COOLDOWN = float(os.getenv("USER_COOLDOWN_SECONDS", "1.2"))
 MAX_HISTORY = int(os.getenv("MAX_HISTORY_MESSAGES", "8"))
 MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "2600"))
 MAX_IMAGE_MB = float(os.getenv("MAX_IMAGE_MB", "7"))
+MAX_IMAGE_SIDE = int(os.getenv("MAX_IMAGE_SIDE", "1400"))
+FAST_PHOTO_MODE = os.getenv("FAST_PHOTO_MODE", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is not set")
@@ -1144,7 +1146,7 @@ def exact_math_hint(text: str) -> Optional[str]:
 # -----------------------------
 # OCR
 # -----------------------------
-def compress_image(data: bytes, max_side: int = 1800) -> bytes:
+def compress_image(data: bytes, max_side: int = MAX_IMAGE_SIDE) -> bytes:
     im = Image.open(io.BytesIO(data)).convert("RGB")
     im.thumbnail((max_side, max_side))
     b = io.BytesIO()
@@ -1189,6 +1191,29 @@ def preprocess_variants(data: bytes):
         contrast, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
     return [contrast, adaptive, otsu]
+
+
+def ocr_image_quick(data: bytes) -> str:
+    """Single-pass OCR used only as a fallback in fast photo mode."""
+    try:
+        arr = np.frombuffer(data, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            return ""
+        h, w = img.shape[:2]
+        scale = max(1.0, min(2.0, 1400 / max(h, w)))
+        if scale > 1.05:
+            img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        img = cv2.GaussianBlur(img, (3, 3), 0)
+        _, img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        return pytesseract.image_to_string(
+            Image.fromarray(img),
+            lang="rus+eng",
+            config="--oem 3 --psm 6",
+        ).strip()
+    except Exception:
+        return ""
+
 
 def ocr_image(data: bytes) -> str:
     candidates = []
@@ -1324,133 +1349,66 @@ async def solve_text(uid: int, text: str, use_history: bool = True) -> str:
             "уверенно разобрать задачу. Попробуй ещё раз через несколько секунд."
         )
 
-async def solve_image(uid: int, data: bytes, ocr: str, check_solution: bool = False) -> str:
-    if not groq:
-        if ocr:
-            return await solve_text(uid, ocr, use_history=False)
-        return "Не удалось распознать фото."
+async def solve_image(uid: int, data: bytes, ocr: str = "", check_solution: bool = False) -> str:
+    # FAST PATH:
+    # 1) send compressed image directly to vision model
+    # 2) only run OCR if vision fails
+    compressed = compress_image(data, MAX_IMAGE_SIDE)
 
-    compressed = compress_image(data)
-    b64 = base64.b64encode(compressed).decode()
     special = (
         "Проверь именно решение ученика. Найди первый неверный шаг, объясни ошибку "
         "и покажи правильное продолжение. Не ограничивайся только финальным ответом."
         if check_solution else
-        "Реши задание с изображения."
+        "Реши задание с изображения. Сначала самостоятельно прочитай текст с фото."
     )
+
     st = get_state(uid)
     expert = expert_prompt_for_mode(st.mode)
-    prompt = (
-        SYSTEM_PROMPT + "\n\n" + mode_line(uid) + "\n\n" +
-        (expert + "\n\n" if expert else "") +
-        special +
-        "\nOCR-подсказка (может ошибаться):\n" + (ocr or "(пусто)")
-    )
-    messages = [{
-        "role": "user",
-        "content": [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {
-                "url": f"data:image/jpeg;base64,{b64}"
-            }},
-        ],
-    }]
-    try:
-        answer = await ai_chat(messages, model=GROQ_VISION_MODEL)
-        bump_stat(uid, "photos")
-        return answer
-    except Exception as e:
-        bump_stat(uid, "ai_errors")
-        log_error(uid, "solve_image", e)
-        if ocr:
-            return await solve_text(uid, ocr, use_history=False)
-        return "Не удалось проанализировать изображение. Попробуй более чёткое фото."
 
-
-async def generate_exam_variant(uid: int, exam_type: str, subject: str):
-    grade = get_state(uid).grade
-    count = 6 if exam_type == "oge" else 8
-    prompt = (
-        f"Создай тренировочный вариант {exam_type.upper()} по "
-        f"{'математике' if subject == 'math' else 'русскому языку'} "
-        f"для ученика {grade} класса.\n"
-        f"Нужно {count} заданий разной сложности.\n"
-        "Верни строго JSON-массив объектов без Markdown:\n"
-        '[{"n":1,"task":"...","answer":"...","points":1,"topic":"..."}, ...]\n'
-        "Не добавляй текст вне JSON."
-    )
-    raw = await ai_chat([
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": prompt},
-    ], clean_output=False)
-    cleaned = raw.strip()
-    cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
-    cleaned = re.sub(r"```$", "", cleaned).strip()
-    data = json.loads(cleaned)
-    if not isinstance(data, list) or not data:
-        raise ValueError("invalid exam payload")
-    for i, item in enumerate(data, 1):
-        item.setdefault("n", i)
-        item.setdefault("points", 1)
-        item.setdefault("topic", "Общая тема")
-    return data
-
-def format_exam_variant(items: List[dict], exam_type: str, subject: str) -> str:
-    lines = [
-        f"🧪 Тренировочный вариант {exam_type.upper()}",
-        f"Предмет: {'математика' if subject == 'math' else 'русский язык'}",
-        "",
-    ]
-    for item in items:
-        lines.append(f"{item['n']}. {item['task']}  [{item.get('points',1)} б.]")
-        lines.append("")
-    lines.append("Отправь ответы одной строкой, например:")
-    lines.append("1) 4; 2) 17; 3) А; ...")
-    return "\n".join(lines)
-
-async def check_exam_answers(uid: int, payload: dict, user_text: str) -> str:
-    items = payload.get("items", [])
-    exam_type = payload.get("exam_type", "oge")
-    subject = payload.get("subject", "math")
-    max_score = sum(int(i.get("points", 1)) for i in items)
-    prompt = (
-        "Проверь ответы ученика по тренировочному варианту. "
-        "Сравни с эталонными ответами. "
-        "Верни строго JSON без Markdown:\n"
-        '{"score":0,"results":[{"n":1,"correct":true,"comment":"..."}]}\n\n'
-        "Задания и эталоны:\n" + json.dumps(items, ensure_ascii=False) +
-        "\n\nОтветы ученика:\n" + user_text
-    )
-    raw = await ai_chat([
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": prompt},
-    ], clean_output=False)
-    cleaned = re.sub(r"^```(?:json)?", "", raw.strip()).strip()
-    cleaned = re.sub(r"```$", "", cleaned).strip()
-    result = json.loads(cleaned)
-    score = int(result.get("score", 0))
-    score = max(0, min(score, max_score))
-
-    lines = [
-        f"Результат: {score}/{max_score} баллов",
-        "",
-    ]
-    for r in result.get("results", []):
-        mark = "✅" if r.get("correct") else "❌"
-        lines.append(f"{mark} №{r.get('n')}: {r.get('comment','')}")
-        # update weak-topic stats
+    if groq:
+        b64 = base64.b64encode(compressed).decode()
+        prompt = (
+            SYSTEM_PROMPT + "\n\n" + mode_line(uid) + "\n\n" +
+            (expert + "\n\n" if expert else "") +
+            special +
+            "\n\nВажно: анализируй изображение напрямую. "
+            "Не требуй предварительного OCR. Если небольшой фрагмент не читается, "
+            "скажи только что именно не удалось разобрать."
+        )
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {
+                    "url": f"data:image/jpeg;base64,{b64}"
+                }},
+            ],
+        }]
         try:
-            item = next(i for i in items if int(i.get("n")) == int(r.get("n")))
-            update_topic_progress(
-                uid,
-                subject,
-                item.get("topic", "Общая тема"),
-                bool(r.get("correct")),
-            )
-        except Exception:
-            pass
-    return "\n".join(lines), score, max_score
+            answer = await ai_chat(messages, model=GROQ_VISION_MODEL)
+            if answer and len(answer.strip()) >= 10:
+                bump_stat(uid, "photos")
+                return answer
+        except Exception as e:
+            bump_stat(uid, "ai_errors")
+            log_error(uid, "solve_image_vision", e)
 
+    # FALLBACK ONLY: quick OCR
+    if not ocr:
+        ocr = await asyncio.to_thread(ocr_image_quick, compressed)
+
+    if ocr:
+        fallback_prompt = (
+            ("Проверь решение ученика по распознанному тексту:\n" if check_solution
+             else "Реши задание по распознанному тексту:\n")
+            + ocr
+        )
+        return await solve_text(uid, fallback_prompt, use_history=False)
+
+    return (
+        "Не удалось уверенно прочитать фото. "
+        "Попробуй сфотографировать ближе, без наклона и при хорошем освещении."
+    )
 
 # -----------------------------
 # COMMON ACTIONS
@@ -1544,7 +1502,7 @@ async def help_cmd(message: Message):
         "• английский язык;\n"
         "• литература;\n"
         "• ОГЭ/ЕГЭ;\n"
-        "• решать задания по фото;\n"
+        "• быстро решать задания по фото;\n"
         "• бесплатно проверять решение ученика по фото;\n"
         "• объяснять проще/подробнее/другим способом;\n"
         "• давать похожие задачи;\n"
@@ -2017,7 +1975,7 @@ async def photo_handler(message: Message):
     await bot.download_file(file.file_path, destination=b)
     data = b.getvalue()
     if len(data) > MAX_IMAGE_MB * 1024 * 1024:
-        data = compress_image(data, 1600)
+        data = compress_image(data, MAX_IMAGE_SIDE)
 
     photo_cache[uid] = data
     await message.answer_photo(
@@ -2036,19 +1994,17 @@ async def crop_callback(callback: CallbackQuery):
 
     preset = callback.data.split(":")[1]
     cropped = crop_image(data, preset)
-    await callback.answer("Распознаю и анализирую…")
-    ocr = await asyncio.to_thread(ocr_image, cropped)
+    await callback.answer("Анализирую фото…")
     pending, payload = get_pending(uid)
     check_solution = bool(payload.get("check_solution")) if pending == "awaiting_photo" else False
 
-    answer = await solve_image(uid, cropped, ocr, check_solution=check_solution)
-    task_label = ocr or ("Проверка решения по фото" if check_solution else "Задание по фото")
+    # Vision-first: OCR is no longer run before AI.
+    answer = await solve_image(uid, cropped, "", check_solution=check_solution)
+    task_label = "Проверка решения по фото" if check_solution else "Задание по фото"
     last_task_cache[uid] = task_label
     last_answer_cache[uid] = answer
     set_pending(uid, None)
 
-    if ocr:
-        await send_plain(callback.message, "🔎 Распознано:\n" + ocr[:2200])
     await send_plain(callback.message, answer, actions=True)
 
 # -----------------------------

@@ -50,3 +50,8 @@ services:
         sync: false
       - key: PREMIUM_GATES_ENABLED
         value: "true"
+
+      - key: FAST_PHOTO_MODE
+        value: "true"
+      - key: MAX_IMAGE_SIDE
+        value: "1400"
