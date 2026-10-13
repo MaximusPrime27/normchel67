@@ -55,7 +55,7 @@ from aiogram.types import (
 
 load_dotenv()
 
-APP_VERSION = "V10 Expert Modes"
+APP_VERSION = "V10.1 Literature"
 
 # -----------------------------
 # CONFIG
@@ -585,6 +585,9 @@ EXAM_SUBJECT_KB = InlineKeyboardMarkup(
             InlineKeyboardButton(text="⚖️ Обществознание", callback_data="examsubject:social"),
             InlineKeyboardButton(text="🇬🇧 Английский", callback_data="examsubject:english"),
         ],
+        [
+            InlineKeyboardButton(text="📖 Литература", callback_data="examsubject:literature"),
+        ],
     ]
 )
 
@@ -600,6 +603,7 @@ SUBJECTS = {
     "history": {"label": "🏛 История", "mode": "history"},
     "social": {"label": "⚖️ Обществознание", "mode": "social"},
     "english": {"label": "🇬🇧 Английский", "mode": "english"},
+    "literature": {"label": "📖 Литература", "mode": "literature"},
 }
 
 SUBJECT_MENU_KB = InlineKeyboardMarkup(
@@ -623,6 +627,9 @@ SUBJECT_MENU_KB = InlineKeyboardMarkup(
         [
             InlineKeyboardButton(text="⚖️ Обществознание", callback_data="setsubject:social"),
             InlineKeyboardButton(text="🇬🇧 Английский", callback_data="setsubject:english"),
+        ],
+        [
+            InlineKeyboardButton(text="📖 Литература", callback_data="setsubject:literature"),
         ],
     ]
 )
@@ -648,6 +655,9 @@ STUDY_SUBJECT_KB = InlineKeyboardMarkup(
         [
             InlineKeyboardButton(text="⚖️ Обществознание", callback_data="subject:social"),
             InlineKeyboardButton(text="🇬🇧 Английский", callback_data="subject:english"),
+        ],
+        [
+            InlineKeyboardButton(text="📖 Литература", callback_data="subject:literature"),
         ],
     ]
 )
@@ -754,6 +764,11 @@ TOPICS = {
         10: ["Tenses", "Conditionals", "Gerund/Infinitive", "Articles", "Word formation", "Writing"],
         11: ["Advanced grammar", "Vocabulary", "Reading", "Listening strategies", "Writing", "ЕГЭ: устная и письменная части"],
     },
+    "literature": {
+        9: ["Древнерусская литература", "Классицизм и сентиментализм", "Пушкин", "Лермонтов", "Гоголь", "Анализ эпизода и сочинение"],
+        10: ["Гончаров", "Тургенев", "Островский", "Достоевский", "Толстой", "Чехов"],
+        11: ["Серебряный век", "Булгаков", "Шолохов", "Пастернак", "Солженицын", "ЕГЭ: анализ и сочинение"],
+    },
 }
 
 def topics_keyboard(subject: str, grade: int, prefix: str) -> InlineKeyboardMarkup:
@@ -827,6 +842,12 @@ CURRICULUM = """
 Английский язык:
 грамматика; лексика; словообразование; чтение; письмо; перевод;
 объяснение ошибок; школьные задания; ОГЭ/ЕГЭ.
+
+Литература:
+история русской литературы; теория литературы; жанры; композиция;
+сюжет; конфликт; система образов; авторская позиция; тема и идея;
+художественные средства; анализ эпизода и стихотворения; сравнительный
+анализ; аргументация; сочинение; ОГЭ/ЕГЭ.
 """
 
 
@@ -904,6 +925,15 @@ For writing: check grammar, vocabulary, structure and naturalness.
 For translation: preserve meaning, not just word-for-word structure.
 Format: Rule/idea → Analysis → Correct answer.
 """,
+    "literature": """
+Ты эксперт по русской литературе 9–11 классов.
+Анализируй произведение через тему, идею, конфликт, композицию, систему образов и авторскую позицию.
+Для стихотворений обращай внимание на лирического героя, мотивы, композицию, размер и художественные средства, если это уместно.
+Для сочинений помогай сформулировать тезис, подобрать аргументы и выстроить логичный вывод.
+Не выдумывай точные цитаты: если не уверен в формулировке, перескажи смысл без кавычек.
+Для ОГЭ/ЕГЭ отвечай в школьном экзаменационном формате.
+Формат: Тезис → Анализ → Аргументы → Вывод.
+""",
 }
 
 def expert_prompt_for_mode(mode: str) -> str:
@@ -925,6 +955,7 @@ SYSTEM_PROMPT = f"""
 - Для русского и английского: Правило → Разбор → Ответ.
 - Для физики и химии: Дано → Формула/реакция → Решение → Ответ с единицами.
 - Для биологии, истории, обществознания и географии: краткий вывод → объяснение → ответ.
+- Для литературы: Тезис → анализ текста/образа → аргументы → вывод; не выдумывай цитаты.
 - Для информатики: алгоритм → решение → ответ; код только если он действительно нужен.
 - Если есть проверенный локальный результат SymPy, считай его приоритетным.
 - Не выдумывай данные.
@@ -1474,7 +1505,7 @@ async def start(message: Message):
         f"🎒 Класс: {st.grade}\n"
         f"🤖 ИИ: {'подключён' if groq else 'резервный/локальный режим'}\n"
         f"{premium_text(message.from_user.id)}\n\n"
-        "Я могу помогать по 10 школьным предметам, решать задачи, проверять домашнюю работу, обучать по темам, "
+        "Я могу помогать по 11 школьным предметам, решать задачи, проверять домашнюю работу, обучать по темам, "
         "давать тренировки и разбирать ошибки.",
         reply_markup=MAIN_KB,
     )
@@ -1511,6 +1542,7 @@ async def help_cmd(message: Message):
         "• информатика и география;\n"
         "• история и обществознание;\n"
         "• английский язык;\n"
+        "• литература;\n"
         "• ОГЭ/ЕГЭ;\n"
         "• решать задания по фото;\n"
         "• бесплатно проверять решение ученика по фото;\n"
