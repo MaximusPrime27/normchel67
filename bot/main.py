@@ -55,7 +55,7 @@ from aiogram.types import (
 
 load_dotenv()
 
-APP_VERSION = "V9 MultiSubject"
+APP_VERSION = "V10 Expert Modes"
 
 # -----------------------------
 # CONFIG
@@ -829,6 +829,86 @@ CURRICULUM = """
 объяснение ошибок; школьные задания; ОГЭ/ЕГЭ.
 """
 
+
+EXPERT_PROMPTS = {
+    "math": """
+Ты эксперт по школьной математике 9–11 классов.
+Главное: точность, проверка вычислений, понятные шаги.
+Для уравнений и систем проверяй найденные корни подстановкой, где это уместно.
+Для геометрии явно указывай используемую теорему.
+Формат: Решение → Проверка/обоснование → Ответ.
+""",
+    "russian": """
+Ты эксперт по русскому языку 9–11 классов.
+Объясняй правило, показывай конкретное место ошибки и почему выбран именно этот вариант.
+Для пунктуации объясняй каждую спорную запятую.
+Для сочинений оценивай структуру, логику, речевые и грамматические ошибки.
+Формат: Правило → Разбор → Ответ.
+""",
+    "physics": """
+Ты эксперт по школьной физике 9–11 классов.
+Всегда отслеживай единицы измерения и перевод в СИ.
+Если задача расчётная: выпиши Дано, формулы, подстановку чисел и итог с единицами.
+Проверяй размерность результата.
+Если данных не хватает, прямо скажи об этом.
+Формат: Дано → Формулы → Решение → Проверка единиц → Ответ.
+""",
+    "chemistry": """
+Ты эксперт по школьной химии 9–11 классов.
+Проверяй коэффициенты в уравнениях реакций, заряды, валентности и формулы веществ.
+В расчётных задачах показывай количество вещества, молярные массы и пропорции.
+Для ОВР при необходимости показывай изменение степеней окисления.
+Формат: Что происходит → Уравнение/формулы → Расчёт → Ответ.
+""",
+    "biology": """
+Ты эксперт по школьной биологии 9–11 классов.
+Опирайся на точные биологические термины, но объясняй простым языком.
+Для генетики показывай генотипы, гаметы, логику скрещивания и вывод.
+Для анатомии связывай строение с функцией.
+Формат: Ключевая идея → Объяснение → Вывод/ответ.
+""",
+    "informatics": """
+Ты эксперт по школьной информатике 9–11 классов.
+Для алгоритмических задач сначала объясняй идею, затем шаги.
+Для систем счисления и логики показывай промежуточные преобразования.
+Для программирования давай короткий понятный код на Python только если это реально нужно.
+Проверяй граничные случаи.
+Формат: Идея → Алгоритм → Решение → Ответ.
+""",
+    "geography": """
+Ты эксперт по школьной географии 9–11 классов.
+Связывай природные условия, население и хозяйство причинно-следственно.
+Для карт и статистики объясняй, как был сделан вывод.
+Не выдумывай численные показатели, если они не даны.
+Формат: Факт → Причина/связь → Вывод → Ответ.
+""",
+    "history": """
+Ты эксперт по истории России и всемирной истории для 9–11 классов.
+Всегда различай дату, событие, причину, повод и последствия.
+Для спорных трактовок отделяй установленный факт от интерпретации.
+Для заданий ЕГЭ показывай причинно-следственные связи и роль личности.
+Формат: Контекст → Факты → Причины/последствия → Ответ.
+""",
+    "social": """
+Ты эксперт по обществознанию 9–11 классов.
+Используй школьные определения понятий и не подменяй их бытовыми формулировками.
+Для права опирайся на общие принципы законодательства без выдуманных статей.
+Для экономики и политики показывай причинно-следственные связи.
+Формат: Понятие/норма → Разбор ситуации → Вывод → Ответ.
+""",
+    "english": """
+You are an expert school English tutor for grades 9–11.
+Explain grammar in Russian unless the task explicitly asks for English-only output.
+For grammar tasks: identify the rule, explain the error, then give the correct form.
+For writing: check grammar, vocabulary, structure and naturalness.
+For translation: preserve meaning, not just word-for-word structure.
+Format: Rule/idea → Analysis → Correct answer.
+""",
+}
+
+def expert_prompt_for_mode(mode: str) -> str:
+    return EXPERT_PROMPTS.get(mode, "")
+
 SYSTEM_PROMPT = f"""
 Ты MathSolver — сильный, но понятный учебный помощник.
 
@@ -1181,10 +1261,14 @@ async def solve_text(uid: int, text: str, use_history: bool = True) -> str:
     if cached:
         return cached
 
+    st = get_state(uid)
+    expert = expert_prompt_for_mode(st.mode)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "system", "content": mode_line(uid)},
     ]
+    if expert:
+        messages.append({"role": "system", "content": expert})
     messages.extend(hist)
     prompt = text
     if hint:
@@ -1223,8 +1307,11 @@ async def solve_image(uid: int, data: bytes, ocr: str, check_solution: bool = Fa
         if check_solution else
         "Реши задание с изображения."
     )
+    st = get_state(uid)
+    expert = expert_prompt_for_mode(st.mode)
     prompt = (
         SYSTEM_PROMPT + "\n\n" + mode_line(uid) + "\n\n" +
+        (expert + "\n\n" if expert else "") +
         special +
         "\nOCR-подсказка (может ошибаться):\n" + (ocr or "(пусто)")
     )
@@ -1406,7 +1493,8 @@ async def status_cmd(message: Message):
         f"Резервный AI: {'да' if FALLBACK_API_KEY else 'нет'}\n"
         f"Решено: {stat.solved}\n"
         f"Фото: {stat.photos}\n"
-        f"{premium_text(uid)}"
+        f"{premium_text(uid)}\n"
+        f"Экспертный режим: {'да' if expert_prompt_for_mode(st.mode) else 'общий'}"
     )
 
 @router.message(Command("version"))
@@ -1433,7 +1521,7 @@ async def help_cmd(message: Message):
         "• создавать варианты ОГЭ/ЕГЭ с баллами;\n"
         "• показывать слабые темы;\n"
         "• хранить профиль, историю и избранное.\n\n"
-        "Команды: /status, /version, /reset, /profile, /premium, /paysupport"
+        "Команды: /status, /version, /reset, /profile, /premium, /paysupport, /expert"
     )
 
 
@@ -1604,7 +1692,24 @@ async def set_subject_callback(callback: CallbackQuery):
     await callback.message.answer(
         f"{item['label']} — режим включён.\n"
         f"🎒 Класс: {get_state(callback.from_user.id).grade}\n\n"
-        "Теперь отправь вопрос, задачу или фото."
+        "Экспертный режим для этого предмета включён. Теперь отправь вопрос, задачу или фото."
+    )
+
+
+
+@router.message(Command("expert"))
+async def expert_status(message: Message):
+    st = get_state(message.from_user.id)
+    label = next(
+        (v["label"] for v in SUBJECTS.values() if v["mode"] == st.mode),
+        st.mode,
+    )
+    enabled = bool(expert_prompt_for_mode(st.mode))
+    await message.answer(
+        f"🧠 Экспертный режим\n\n"
+        f"Предмет: {label}\n"
+        f"Статус: {'включён' if enabled else 'общий режим'}\n"
+        f"Класс: {st.grade}"
     )
 
 
