@@ -55,7 +55,7 @@ from aiogram.types import (
 
 load_dotenv()
 
-APP_VERSION = "V8.2 Free Check"
+APP_VERSION = "V9 MultiSubject"
 
 # -----------------------------
 # CONFIG
@@ -524,6 +524,7 @@ TRANSFORMS = standard_transformations + (
 MAIN_KB = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="▶️ Старт")],
+        [KeyboardButton(text="📚 Предметы")],
         [KeyboardButton(text="🧮 Математика"), KeyboardButton(text="🇷🇺 Русский язык")],
         [KeyboardButton(text="🎓 ОГЭ"), KeyboardButton(text="🏆 ЕГЭ")],
         [KeyboardButton(text="📷 Решить по фото"), KeyboardButton(text="✅ Проверить решение — бесплатно")],
@@ -563,10 +564,92 @@ EXAM_TYPE_KB = InlineKeyboardMarkup(
 )
 
 EXAM_SUBJECT_KB = InlineKeyboardMarkup(
-    inline_keyboard=[[
-        InlineKeyboardButton(text="🧮 Математика", callback_data="examsubject:math"),
-        InlineKeyboardButton(text="🇷🇺 Русский", callback_data="examsubject:rus"),
-    ]]
+    inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🧮 Математика", callback_data="examsubject:math"),
+            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="examsubject:russian"),
+        ],
+        [
+            InlineKeyboardButton(text="⚛️ Физика", callback_data="examsubject:physics"),
+            InlineKeyboardButton(text="🧪 Химия", callback_data="examsubject:chemistry"),
+        ],
+        [
+            InlineKeyboardButton(text="🧬 Биология", callback_data="examsubject:biology"),
+            InlineKeyboardButton(text="💻 Информатика", callback_data="examsubject:informatics"),
+        ],
+        [
+            InlineKeyboardButton(text="🌍 География", callback_data="examsubject:geography"),
+            InlineKeyboardButton(text="🏛 История", callback_data="examsubject:history"),
+        ],
+        [
+            InlineKeyboardButton(text="⚖️ Обществознание", callback_data="examsubject:social"),
+            InlineKeyboardButton(text="🇬🇧 Английский", callback_data="examsubject:english"),
+        ],
+    ]
+)
+
+
+SUBJECTS = {
+    "math": {"label": "🧮 Математика", "mode": "math"},
+    "russian": {"label": "🇷🇺 Русский язык", "mode": "russian"},
+    "physics": {"label": "⚛️ Физика", "mode": "physics"},
+    "chemistry": {"label": "🧪 Химия", "mode": "chemistry"},
+    "biology": {"label": "🧬 Биология", "mode": "biology"},
+    "informatics": {"label": "💻 Информатика", "mode": "informatics"},
+    "geography": {"label": "🌍 География", "mode": "geography"},
+    "history": {"label": "🏛 История", "mode": "history"},
+    "social": {"label": "⚖️ Обществознание", "mode": "social"},
+    "english": {"label": "🇬🇧 Английский", "mode": "english"},
+}
+
+SUBJECT_MENU_KB = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🧮 Математика", callback_data="setsubject:math"),
+            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="setsubject:russian"),
+        ],
+        [
+            InlineKeyboardButton(text="⚛️ Физика", callback_data="setsubject:physics"),
+            InlineKeyboardButton(text="🧪 Химия", callback_data="setsubject:chemistry"),
+        ],
+        [
+            InlineKeyboardButton(text="🧬 Биология", callback_data="setsubject:biology"),
+            InlineKeyboardButton(text="💻 Информатика", callback_data="setsubject:informatics"),
+        ],
+        [
+            InlineKeyboardButton(text="🌍 География", callback_data="setsubject:geography"),
+            InlineKeyboardButton(text="🏛 История", callback_data="setsubject:history"),
+        ],
+        [
+            InlineKeyboardButton(text="⚖️ Обществознание", callback_data="setsubject:social"),
+            InlineKeyboardButton(text="🇬🇧 Английский", callback_data="setsubject:english"),
+        ],
+    ]
+)
+
+STUDY_SUBJECT_KB = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🧮 Математика", callback_data="subject:math"),
+            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="subject:russian"),
+        ],
+        [
+            InlineKeyboardButton(text="⚛️ Физика", callback_data="subject:physics"),
+            InlineKeyboardButton(text="🧪 Химия", callback_data="subject:chemistry"),
+        ],
+        [
+            InlineKeyboardButton(text="🧬 Биология", callback_data="subject:biology"),
+            InlineKeyboardButton(text="💻 Информатика", callback_data="subject:informatics"),
+        ],
+        [
+            InlineKeyboardButton(text="🌍 География", callback_data="subject:geography"),
+            InlineKeyboardButton(text="🏛 История", callback_data="subject:history"),
+        ],
+        [
+            InlineKeyboardButton(text="⚖️ Обществознание", callback_data="subject:social"),
+            InlineKeyboardButton(text="🇬🇧 Английский", callback_data="subject:english"),
+        ],
+    ]
 )
 
 CLASS_KB = InlineKeyboardMarkup(
@@ -626,10 +709,50 @@ TOPICS = {
         10: ["Тригонометрия", "Степени и корни", "Функции", "Векторы", "Стереометрия", "Вероятность"],
         11: ["Производная", "Интеграл", "Тригонометрия", "Параметры", "Стереометрия", "Экономические задачи"],
     },
-    "rus": {
+    "russian": {
         9: ["Орфография", "Пунктуация", "СПП/ССП/БСП", "Н/НН", "НЕ/НИ", "ОГЭ: изложение и сочинение"],
         10: ["Орфография", "Морфология", "Синтаксис", "Пунктуация", "Лексика и паронимы", "Текст и стили речи"],
         11: ["Орфография ЕГЭ", "Пунктуация ЕГЭ", "Грамматические нормы", "Средства выразительности", "Работа с текстом", "Сочинение ЕГЭ"],
+    },
+    "physics": {
+        9: ["Механика", "Законы Ньютона", "Работа и энергия", "Импульс", "Электричество", "Оптика"],
+        10: ["Кинематика", "Динамика", "МКТ", "Термодинамика", "Электростатика", "Постоянный ток"],
+        11: ["Магнитное поле", "Электромагнитная индукция", "Колебания и волны", "Оптика", "Квантовая физика", "Атом и ядро"],
+    },
+    "chemistry": {
+        9: ["Строение атома", "Периодический закон", "Химическая связь", "Классы неорганических веществ", "Уравнения реакций", "Расчёты по уравнениям"],
+        10: ["Органическая химия", "Углеводороды", "Спирты и фенолы", "Альдегиды и кислоты", "Углеводы", "Амины и аминокислоты"],
+        11: ["Окислительно-восстановительные реакции", "Электролиз", "Равновесие", "Растворы", "Цепочки превращений", "Расчётные задачи"],
+    },
+    "biology": {
+        9: ["Клетка", "Ткани", "Органы и системы", "Генетика", "Эволюция", "Экология"],
+        10: ["Цитология", "Обмен веществ", "Размножение", "Генетика", "Селекция", "Биосфера"],
+        11: ["Молекулярная биология", "Генетика человека", "Эволюция", "Экология", "Анатомия", "ЕГЭ: анализ заданий"],
+    },
+    "informatics": {
+        9: ["Информация и кодирование", "Системы счисления", "Логика", "Алгоритмы", "Таблицы", "ОГЭ: программирование"],
+        10: ["Алгоритмы", "Python", "Логические выражения", "Системы счисления", "Массивы", "Компьютерные сети"],
+        11: ["Python", "Динамическое программирование", "Графы", "Теория игр", "Логика", "ЕГЭ: задачи 24–27"],
+    },
+    "geography": {
+        9: ["Россия: природа", "Население России", "Хозяйство России", "Регионы России", "Карты", "ОГЭ: задания по картам"],
+        10: ["Политическая карта мира", "Природные ресурсы", "Население мира", "Мировое хозяйство", "Регионы мира", "Глобальные проблемы"],
+        11: ["География России", "Экономическая география", "Демография", "Мировое хозяйство", "Карты и статистика", "ЕГЭ: анализ данных"],
+    },
+    "history": {
+        9: ["Россия XIX века", "Реформы", "Общественные движения", "Культура XIX века", "Первая мировая", "Революции"],
+        10: ["Древняя Русь", "Московское государство", "Россия XVII века", "Пётр I", "XVIII век", "Культура"],
+        11: ["Россия XX века", "СССР", "Великая Отечественная война", "Послевоенный СССР", "Перестройка", "Современная Россия"],
+    },
+    "social": {
+        9: ["Человек и общество", "Экономика", "Социальная сфера", "Политика", "Право", "ОГЭ: практика"],
+        10: ["Общество", "Духовная культура", "Экономика", "Социальные отношения", "Политика", "Право"],
+        11: ["Экономика", "Социология", "Политология", "Конституционное право", "Гражданское право", "ЕГЭ: задания второй части"],
+    },
+    "english": {
+        9: ["Present/Past/Future", "Modal verbs", "Passive Voice", "Reported Speech", "Vocabulary", "ОГЭ: письмо и чтение"],
+        10: ["Tenses", "Conditionals", "Gerund/Infinitive", "Articles", "Word formation", "Writing"],
+        11: ["Advanced grammar", "Vocabulary", "Reading", "Listening strategies", "Writing", "ЕГЭ: устная и письменная части"],
     },
 }
 
@@ -668,6 +791,42 @@ CURRICULUM = """
 морфология; синтаксис; грамматическая основа; однородные и обособленные
 члены; вводные слова; обращения; ССП, СПП, БСП; прямая речь; пунктуация;
 текст; стили и типы речи; выразительные средства; сочинение; ОГЭ/ЕГЭ.
+
+
+Физика:
+механика; молекулярная физика; термодинамика; электродинамика;
+колебания и волны; оптика; квантовая, атомная и ядерная физика;
+расчётные задачи; ОГЭ/ЕГЭ.
+
+Химия:
+строение атома; периодический закон; химическая связь; неорганическая
+и органическая химия; ОВР; электролиз; растворы; химическое равновесие;
+цепочки превращений; расчётные задачи; ОГЭ/ЕГЭ.
+
+Биология:
+цитология; анатомия; генетика; эволюция; экология; ботаника; зоология;
+молекулярная биология; физиология человека; ОГЭ/ЕГЭ.
+
+Информатика:
+информация и кодирование; системы счисления; логика; алгоритмы; Python;
+таблицы; базы данных; сети; графы; теория игр; ОГЭ/ЕГЭ.
+
+География:
+карты; физическая и социально-экономическая география; Россия;
+население; мировое хозяйство; природные ресурсы; статистические данные;
+ОГЭ/ЕГЭ.
+
+История:
+история России с древнейших времён до современности; всемирная история;
+хронология; личности; события; причины и последствия; культура; ОГЭ/ЕГЭ.
+
+Обществознание:
+человек и общество; духовная культура; экономика; социальные отношения;
+политика; право; Конституция РФ; ОГЭ/ЕГЭ.
+
+Английский язык:
+грамматика; лексика; словообразование; чтение; письмо; перевод;
+объяснение ошибок; школьные задания; ОГЭ/ЕГЭ.
 """
 
 SYSTEM_PROMPT = f"""
@@ -683,7 +842,10 @@ SYSTEM_PROMPT = f"""
 - Дроби: (a+b)/(c+d).
 - Коротко и понятно.
 - Для математики: Решение → необходимые шаги → Ответ.
-- Для русского: Правило → Разбор → Ответ.
+- Для русского и английского: Правило → Разбор → Ответ.
+- Для физики и химии: Дано → Формула/реакция → Решение → Ответ с единицами.
+- Для биологии, истории, обществознания и географии: краткий вывод → объяснение → ответ.
+- Для информатики: алгоритм → решение → ответ; код только если он действительно нужен.
 - Если есть проверенный локальный результат SymPy, считай его приоритетным.
 - Не выдумывай данные.
 - При неоднозначном фото честно укажи, что не читается.
@@ -1184,7 +1346,7 @@ async def generate_lesson(uid: int, subject: str, topic: str) -> str:
     grade = get_state(uid).grade
     prompt = (
         f"Составь короткий мини-урок для {grade} класса.\n"
-        f"Предмет: {'математика' if subject == 'math' else 'русский язык'}.\n"
+        f"Предмет: {SUBJECTS.get(subject, {'label': subject})['label']}.\n" 
         f"Тема: {topic}.\n"
         "Формат: 1) простое правило/идея; 2) один разобранный пример; "
         "3) три частые ошибки; 4) одно маленькое задание для самопроверки. "
@@ -1198,7 +1360,7 @@ async def generate_training(uid: int, subject: str, topic: str) -> Tuple[str, st
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": (
             f"Создай одно тренировочное задание для {grade} класса. "
-            f"Предмет: {subject}. Тема: {topic}. "
+            f"Предмет: {SUBJECTS.get(subject, {'label': subject})['label']}. Тема: {topic}. "
             "Ответ верни строго двумя блоками:\n"
             "ЗАДАНИЕ: ...\n"
             "ОТВЕТ: ...\n"
@@ -1225,7 +1387,7 @@ async def start(message: Message):
         f"🎒 Класс: {st.grade}\n"
         f"🤖 ИИ: {'подключён' if groq else 'резервный/локальный режим'}\n"
         f"{premium_text(message.from_user.id)}\n\n"
-        "Я могу решать задачи, проверять домашнюю работу, обучать по темам, "
+        "Я могу помогать по 10 школьным предметам, решать задачи, проверять домашнюю работу, обучать по темам, "
         "давать тренировки и разбирать ошибки.",
         reply_markup=MAIN_KB,
     )
@@ -1256,8 +1418,11 @@ async def version_cmd(message: Message):
 async def help_cmd(message: Message):
     await message.answer(
         "Что умеет бот:\n\n"
-        "• решать математику 9–11 классов;\n"
-        "• разбирать русский язык;\n"
+        "• математика и русский язык;\n"
+        "• физика, химия, биология;\n"
+        "• информатика и география;\n"
+        "• история и обществознание;\n"
+        "• английский язык;\n"
         "• ОГЭ/ЕГЭ;\n"
         "• решать задания по фото;\n"
         "• бесплатно проверять решение ученика по фото;\n"
@@ -1421,6 +1586,28 @@ async def pay_support(message: Message):
     )
 
 
+
+@router.message(F.text == "📚 Предметы")
+async def subjects_menu(message: Message):
+    await message.answer("Выбери предмет:", reply_markup=SUBJECT_MENU_KB)
+
+@router.callback_query(F.data.startswith("setsubject:"))
+async def set_subject_callback(callback: CallbackQuery):
+    key = callback.data.split(":", 1)[1]
+    item = SUBJECTS.get(key)
+    if not item:
+        await callback.answer("Неизвестный предмет.", show_alert=True)
+        return
+    update_state(callback.from_user.id, mode=item["mode"])
+    clear_history(callback.from_user.id)
+    await callback.answer("Предмет выбран")
+    await callback.message.answer(
+        f"{item['label']} — режим включён.\n"
+        f"🎒 Класс: {get_state(callback.from_user.id).grade}\n\n"
+        "Теперь отправь вопрос, задачу или фото."
+    )
+
+
 # -----------------------------
 # MODES / CLASS
 # -----------------------------
@@ -1531,12 +1718,12 @@ async def reset_handler(message: Message):
 @router.message(F.text == "📖 Учиться")
 async def study_menu(message: Message):
     set_pending(message.from_user.id, "choose_study_subject")
-    await message.answer("Выбери предмет для мини-урока:", reply_markup=SUBJECT_KB)
+    await message.answer("Выбери предмет для мини-урока:", reply_markup=STUDY_SUBJECT_KB)
 
 @router.message(F.text == "📝 Тренировка")
 async def training_menu(message: Message):
     set_pending(message.from_user.id, "choose_training_subject")
-    await message.answer("Выбери предмет для тренировки:", reply_markup=SUBJECT_KB)
+    await message.answer("Выбери предмет для тренировки:", reply_markup=STUDY_SUBJECT_KB)
 
 @router.callback_query(F.data.startswith("subject:"))
 async def subject_callback(callback: CallbackQuery):
@@ -1804,7 +1991,7 @@ async def text_handler(message: Message):
     if text.startswith("/"):
         return
     if text in {
-        "▶️ Старт", "🧮 Математика", "🇷🇺 Русский язык", "🎓 ОГЭ", "🏆 ЕГЭ",
+        "▶️ Старт", "📚 Предметы", "🧮 Математика", "🇷🇺 Русский язык", "🎓 ОГЭ", "🏆 ЕГЭ",
         "📷 Решить по фото", "✅ Проверить решение — бесплатно", "📖 Учиться", "📝 Тренировка",
         "🧪 Вариант ОГЭ/ЕГЭ", "📉 Слабые темы", "💎 Premium",
         "🎒 Выбрать класс", "👤 Профиль", "⭐ Избранное", "📚 История",
