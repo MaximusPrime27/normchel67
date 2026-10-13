@@ -55,7 +55,7 @@ from aiogram.types import (
 
 load_dotenv()
 
-APP_VERSION = "V8.1 Free Check"
+APP_VERSION = "V8.2 Free Check"
 
 # -----------------------------
 # CONFIG
@@ -526,7 +526,7 @@ MAIN_KB = ReplyKeyboardMarkup(
         [KeyboardButton(text="▶️ Старт")],
         [KeyboardButton(text="🧮 Математика"), KeyboardButton(text="🇷🇺 Русский язык")],
         [KeyboardButton(text="🎓 ОГЭ"), KeyboardButton(text="🏆 ЕГЭ")],
-        [KeyboardButton(text="📷 Решить по фото"), KeyboardButton(text="✅ Проверить решение")],
+        [KeyboardButton(text="📷 Решить по фото"), KeyboardButton(text="✅ Проверить решение — бесплатно")],
         [KeyboardButton(text="📖 Учиться"), KeyboardButton(text="📝 Тренировка")],
         [KeyboardButton(text="🧪 Вариант ОГЭ/ЕГЭ"), KeyboardButton(text="📉 Слабые темы")],
         [KeyboardButton(text="💎 Premium"), KeyboardButton(text="👤 Профиль")],
@@ -1260,7 +1260,7 @@ async def help_cmd(message: Message):
         "• разбирать русский язык;\n"
         "• ОГЭ/ЕГЭ;\n"
         "• решать задания по фото;\n"
-        "• проверять решение ученика по фото;\n"
+        "• бесплатно проверять решение ученика по фото;\n"
         "• объяснять проще/подробнее/другим способом;\n"
         "• давать похожие задачи;\n"
         "• проверять твой ответ;\n"
@@ -1674,7 +1674,7 @@ async def solve_photo_mode(message: Message):
     set_pending(message.from_user.id, "awaiting_photo", {"check_solution": False})
     await message.answer("📷 Отправь фото задания.")
 
-@router.message(F.text == "✅ Проверить решение")
+@router.message(F.text == "✅ Проверить решение — бесплатно")
 async def check_photo_mode(message: Message):
     set_pending(message.from_user.id, "awaiting_photo", {"check_solution": True})
     await message.answer(
@@ -1805,7 +1805,7 @@ async def text_handler(message: Message):
         return
     if text in {
         "▶️ Старт", "🧮 Математика", "🇷🇺 Русский язык", "🎓 ОГЭ", "🏆 ЕГЭ",
-        "📷 Решить по фото", "✅ Проверить решение", "📖 Учиться", "📝 Тренировка",
+        "📷 Решить по фото", "✅ Проверить решение — бесплатно", "📖 Учиться", "📝 Тренировка",
         "🧪 Вариант ОГЭ/ЕГЭ", "📉 Слабые темы", "💎 Premium",
         "🎒 Выбрать класс", "👤 Профиль", "⭐ Избранное", "📚 История",
         "🧹 Сбросить контекст", "ℹ️ Помощь"
