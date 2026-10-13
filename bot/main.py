@@ -55,7 +55,7 @@ from aiogram.types import (
 
 load_dotenv()
 
-APP_VERSION = "V10.2 Fast Photo"
+APP_VERSION = "V10.3 Photo UX"
 
 # -----------------------------
 # CONFIG
@@ -680,6 +680,13 @@ SUBJECT_KB = InlineKeyboardMarkup(
 )
 
 CROP_KB = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="📸 Решить всё фото", callback_data="crop:full")],
+        [InlineKeyboardButton(text="✂️ Выбрать область", callback_data="crop:choose")],
+    ]
+)
+
+CROP_DETAIL_KB = InlineKeyboardMarkup(
     inline_keyboard=[
         [
             InlineKeyboardButton(text="⬆ Верх", callback_data="crop:top"),
@@ -1954,13 +1961,13 @@ async def exam_subject_callback(callback: CallbackQuery):
 @router.message(F.text == "📷 Решить по фото")
 async def solve_photo_mode(message: Message):
     set_pending(message.from_user.id, "awaiting_photo", {"check_solution": False})
-    await message.answer("📷 Отправь фото задания.")
+    await message.answer("📷 Отправь фото задания. После загрузки можно сразу нажать «📸 Решить всё фото».")
 
 @router.message(F.text == "✅ Проверить решение — бесплатно")
 async def check_photo_mode(message: Message):
     set_pending(message.from_user.id, "awaiting_photo", {"check_solution": True})
     await message.answer(
-        "✅ Отправь фото своего решения. Я постараюсь найти первый неверный шаг."
+        "✅ Отправь фото своего решения. После загрузки можно сразу нажать «📸 Решить всё фото»."
     )
 
 @router.message(F.photo)
@@ -1980,8 +1987,21 @@ async def photo_handler(message: Message):
     photo_cache[uid] = data
     await message.answer_photo(
         BufferedInputFile(data, filename="task.jpg"),
-        caption="✂️ Выбери область:",
+        caption="📷 Что сделать с фото?",
         reply_markup=CROP_KB,
+    )
+
+
+@router.callback_query(F.data == "crop:choose")
+async def crop_choose_callback(callback: CallbackQuery):
+    uid = callback.from_user.id
+    if uid not in photo_cache:
+        await callback.answer("Фото не найдено.", show_alert=True)
+        return
+    await callback.answer()
+    await callback.message.answer(
+        "✂️ Выбери область изображения:",
+        reply_markup=CROP_DETAIL_KB,
     )
 
 @router.callback_query(F.data.startswith("crop:"))
@@ -1993,6 +2013,9 @@ async def crop_callback(callback: CallbackQuery):
         return
 
     preset = callback.data.split(":")[1]
+    if preset == "choose":
+        await callback.answer()
+        return
     cropped = crop_image(data, preset)
     await callback.answer("Анализирую фото…")
     pending, payload = get_pending(uid)
