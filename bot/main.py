@@ -55,7 +55,7 @@ from aiogram.types import (
 
 load_dotenv()
 
-APP_VERSION = "V8 Stars"
+APP_VERSION = "V8.1 Free Check"
 
 # -----------------------------
 # CONFIG
@@ -1676,9 +1676,6 @@ async def solve_photo_mode(message: Message):
 
 @router.message(F.text == "✅ Проверить решение")
 async def check_photo_mode(message: Message):
-    if not require_premium_flag(message.from_user.id):
-        await message.answer("💎 Проверка решения по фото доступна в Premium.", reply_markup=PREMIUM_KB)
-        return
     set_pending(message.from_user.id, "awaiting_photo", {"check_solution": True})
     await message.answer(
         "✅ Отправь фото своего решения. Я постараюсь найти первый неверный шаг."
