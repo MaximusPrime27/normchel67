@@ -11,6 +11,7 @@ import os
 import re
 import secrets
 import time
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -45,14 +46,16 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
+    LabeledPrice,
     Message,
+    PreCheckoutQuery,
     ReplyKeyboardMarkup,
     Update,
 )
 
 load_dotenv()
 
-APP_VERSION = "V7 Admin Pro"
+APP_VERSION = "V8 Stars"
 
 # -----------------------------
 # CONFIG
@@ -79,6 +82,17 @@ ADMIN_IDS = {
 
 ADMIN_WEB_USER = os.getenv("ADMIN_WEB_USER", "admin").strip()
 ADMIN_WEB_PASSWORD = os.getenv("ADMIN_WEB_PASSWORD", "").strip()
+
+PAY_SUPPORT_CONTACT = os.getenv("PAY_SUPPORT_CONTACT", "").strip()
+PREMIUM_GATES_ENABLED = os.getenv("PREMIUM_GATES_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+PREMIUM_PLANS = {
+    "30": {"days": 30, "stars": 100, "label": "30 дней"},
+    "90": {"days": 90, "stars": 250, "label": "90 дней"},
+    "180": {"days": 180, "stars": 450, "label": "180 дней"},
+    "360": {"days": 360, "stars": 900, "label": "360 дней"},
+    "life": {"days": None, "stars": 1500, "label": "Навсегда"},
+}
 
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "55"))
 MAX_CONCURRENT_AI = int(os.getenv("MAX_CONCURRENT_AI", "4"))
@@ -158,6 +172,29 @@ class CacheEntry(Base):
     __tablename__ = "cache"
     key = Column(String(64), primary_key=True)
     value = Column(Text, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+
+
+class PremiumAccess(Base):
+    __tablename__ = "premium_access"
+    user_id = Column(Integer, primary_key=True)
+    lifetime = Column(Boolean, nullable=False, default=False)
+    expires_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+class StarPayment(Base):
+    __tablename__ = "star_payments"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, index=True, nullable=False)
+    plan_key = Column(String(16), nullable=False)
+    stars = Column(Integer, nullable=False)
+    currency = Column(String(8), nullable=False, default="XTR")
+    invoice_payload = Column(String(128), nullable=False)
+    telegram_payment_charge_id = Column(String(256), nullable=False, unique=True, index=True)
+    provider_payment_charge_id = Column(String(256), nullable=True)
+    status = Column(String(32), nullable=False, default="paid")
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -307,6 +344,90 @@ def cache_put(key: str, value: str):
         s.commit()
 
 
+
+
+def utcnow_naive():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+def get_premium(uid: int):
+    with SessionLocal() as s:
+        row = s.get(PremiumAccess, uid)
+        if not row:
+            return {
+                "active": False,
+                "lifetime": False,
+                "expires_at": None,
+            }
+        now = utcnow_naive()
+        active = bool(row.lifetime or (row.expires_at and row.expires_at > now))
+        return {
+            "active": active,
+            "lifetime": bool(row.lifetime),
+            "expires_at": row.expires_at,
+        }
+
+def premium_text(uid: int) -> str:
+    info = get_premium(uid)
+    if info["lifetime"]:
+        return "💎 Premium: навсегда"
+    if info["active"] and info["expires_at"]:
+        return "💎 Premium до " + info["expires_at"].strftime("%d.%m.%Y")
+    return "⚪ Premium не активен"
+
+def grant_premium(uid: int, plan_key: str):
+    plan = PREMIUM_PLANS[plan_key]
+    now = utcnow_naive()
+    with SessionLocal() as s:
+        row = s.get(PremiumAccess, uid)
+        if not row:
+            row = PremiumAccess(user_id=uid, lifetime=False, expires_at=None)
+            s.add(row)
+
+        if plan["days"] is None:
+            row.lifetime = True
+            row.expires_at = None
+        elif not row.lifetime:
+            start = now
+            if row.expires_at and row.expires_at > now:
+                start = row.expires_at
+            row.expires_at = start + timedelta(days=int(plan["days"]))
+        s.commit()
+
+def payment_exists(charge_id: str) -> bool:
+    with SessionLocal() as s:
+        return s.execute(
+            select(StarPayment).where(
+                StarPayment.telegram_payment_charge_id == charge_id
+            )
+        ).scalar_one_or_none() is not None
+
+def save_star_payment(
+    uid: int,
+    plan_key: str,
+    stars: int,
+    payload: str,
+    charge_id: str,
+    provider_charge_id: Optional[str],
+):
+    with SessionLocal() as s:
+        s.add(StarPayment(
+            user_id=uid,
+            plan_key=plan_key,
+            stars=stars,
+            currency="XTR",
+            invoice_payload=payload,
+            telegram_payment_charge_id=charge_id,
+            provider_payment_charge_id=provider_charge_id,
+            status="paid",
+        ))
+        s.commit()
+
+def require_premium_flag(uid: int) -> bool:
+    if not PREMIUM_GATES_ENABLED:
+        return True
+    return bool(get_premium(uid)["active"])
+
+
 def log_error(user_id: Optional[int], source: str, exc: Exception):
     try:
         with SessionLocal() as s:
@@ -408,13 +529,31 @@ MAIN_KB = ReplyKeyboardMarkup(
         [KeyboardButton(text="📷 Решить по фото"), KeyboardButton(text="✅ Проверить решение")],
         [KeyboardButton(text="📖 Учиться"), KeyboardButton(text="📝 Тренировка")],
         [KeyboardButton(text="🧪 Вариант ОГЭ/ЕГЭ"), KeyboardButton(text="📉 Слабые темы")],
-        [KeyboardButton(text="🎒 Выбрать класс"), KeyboardButton(text="👤 Профиль")],
-        [KeyboardButton(text="⭐ Избранное"), KeyboardButton(text="📚 История")],
+        [KeyboardButton(text="💎 Premium"), KeyboardButton(text="👤 Профиль")],
+        [KeyboardButton(text="🎒 Выбрать класс"), KeyboardButton(text="📚 История")],
+        [KeyboardButton(text="⭐ Избранное")],
         [KeyboardButton(text="🧹 Сбросить контекст"), KeyboardButton(text="ℹ️ Помощь")],
     ],
     resize_keyboard=True,
 )
 
+
+
+PREMIUM_KB = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [
+            InlineKeyboardButton(text="30 дней — 100 ⭐", callback_data="buy:30"),
+            InlineKeyboardButton(text="90 дней — 250 ⭐", callback_data="buy:90"),
+        ],
+        [
+            InlineKeyboardButton(text="180 дней — 450 ⭐", callback_data="buy:180"),
+            InlineKeyboardButton(text="360 дней — 900 ⭐", callback_data="buy:360"),
+        ],
+        [
+            InlineKeyboardButton(text="Навсегда — 1500 ⭐", callback_data="buy:life"),
+        ],
+    ]
+)
 
 EXAM_TYPE_KB = InlineKeyboardMarkup(
     inline_keyboard=[[
@@ -1084,7 +1223,8 @@ async def start(message: Message):
     await message.answer(
         f"📚 MathSolver {APP_VERSION}\n\n"
         f"🎒 Класс: {st.grade}\n"
-        f"🤖 ИИ: {'подключён' if groq else 'резервный/локальный режим'}\n\n"
+        f"🤖 ИИ: {'подключён' if groq else 'резервный/локальный режим'}\n"
+        f"{premium_text(message.from_user.id)}\n\n"
         "Я могу решать задачи, проверять домашнюю работу, обучать по темам, "
         "давать тренировки и разбирать ошибки.",
         reply_markup=MAIN_KB,
@@ -1103,7 +1243,8 @@ async def status_cmd(message: Message):
         f"Groq: {'да' if groq else 'нет'}\n"
         f"Резервный AI: {'да' if FALLBACK_API_KEY else 'нет'}\n"
         f"Решено: {stat.solved}\n"
-        f"Фото: {stat.photos}"
+        f"Фото: {stat.photos}\n"
+        f"{premium_text(uid)}"
     )
 
 @router.message(Command("version"))
@@ -1127,8 +1268,158 @@ async def help_cmd(message: Message):
         "• создавать варианты ОГЭ/ЕГЭ с баллами;\n"
         "• показывать слабые темы;\n"
         "• хранить профиль, историю и избранное.\n\n"
-        "Команды: /status, /version, /reset, /profile"
+        "Команды: /status, /version, /reset, /profile, /premium, /paysupport"
     )
+
+
+# -----------------------------
+# TELEGRAM STARS / PREMIUM
+# -----------------------------
+@router.message(Command("premium"))
+@router.message(F.text == "💎 Premium")
+async def premium_menu(message: Message):
+    uid = message.from_user.id
+    ensure_user(uid)
+    status = premium_text(uid)
+    await message.answer(
+        "💎 MathSolver Premium\n\n"
+        f"{status}\n\n"
+        "Тарифы:\n"
+        "• 30 дней — 100 Stars\n"
+        "• 90 дней — 250 Stars\n"
+        "• 180 дней — 450 Stars\n"
+        "• 360 дней — 900 Stars\n"
+        "• Навсегда — 1500 Stars\n\n"
+        "Premium открывает расширенные функции: "
+        "проверку решения по фото, варианты ОГЭ/ЕГЭ и статистику слабых тем.\n\n"
+        "Оплата разовая — автоматического списания нет.",
+        reply_markup=PREMIUM_KB,
+    )
+
+@router.callback_query(F.data.startswith("buy:"))
+async def buy_premium(callback: CallbackQuery):
+    uid = callback.from_user.id
+    plan_key = callback.data.split(":", 1)[1]
+    plan = PREMIUM_PLANS.get(plan_key)
+    if not plan:
+        await callback.answer("Неизвестный тариф.", show_alert=True)
+        return
+
+    if get_premium(uid)["lifetime"]:
+        await callback.answer("У тебя уже Premium навсегда.", show_alert=True)
+        return
+
+    payload = f"premium:{plan_key}"
+    await callback.answer()
+    await callback.message.answer_invoice(
+        title=f"Premium — {plan['label']}",
+        description=f"MathSolver Premium на {plan['label']}. Разовая покупка.",
+        payload=payload,
+        currency="XTR",
+        prices=[LabeledPrice(
+            label=f"Premium {plan['label']}",
+            amount=int(plan["stars"]),
+        )],
+        provider_token="",
+    )
+
+@router.pre_checkout_query()
+async def pre_checkout_handler(query: PreCheckoutQuery):
+    payload = query.invoice_payload or ""
+    try:
+        prefix, plan_key = payload.split(":", 1)
+        plan = PREMIUM_PLANS.get(plan_key)
+        valid = (
+            prefix == "premium"
+            and plan is not None
+            and query.currency == "XTR"
+            and int(query.total_amount) == int(plan["stars"])
+        )
+    except Exception:
+        valid = False
+
+    if not valid:
+        await query.answer(
+            ok=False,
+            error_message="Не удалось проверить тариф. Открой Premium и попробуй снова.",
+        )
+        return
+
+    await query.answer(ok=True)
+
+@router.message(F.successful_payment)
+async def successful_payment_handler(message: Message):
+    uid = message.from_user.id
+    payment = message.successful_payment
+
+    if payment.currency != "XTR":
+        return
+
+    payload = payment.invoice_payload or ""
+    try:
+        prefix, plan_key = payload.split(":", 1)
+    except Exception:
+        await message.answer("Платёж получен, но тариф не распознан. Напиши в /paysupport.")
+        return
+
+    plan = PREMIUM_PLANS.get(plan_key)
+    if prefix != "premium" or not plan:
+        await message.answer("Платёж получен, но тариф не распознан. Напиши в /paysupport.")
+        return
+
+    charge_id = payment.telegram_payment_charge_id
+
+    # Idempotency: webhook/update can theoretically be delivered again.
+    if payment_exists(charge_id):
+        await message.answer(
+            "✅ Этот платёж уже обработан.\n" + premium_text(uid)
+        )
+        return
+
+    # Validate the final successful payment too.
+    if int(payment.total_amount) != int(plan["stars"]):
+        await message.answer(
+            "Платёж получен с неожиданной суммой. Доступ автоматически не выдан. "
+            "Напиши в /paysupport."
+        )
+        return
+
+    try:
+        save_star_payment(
+            uid=uid,
+            plan_key=plan_key,
+            stars=int(payment.total_amount),
+            payload=payload,
+            charge_id=charge_id,
+            provider_charge_id=getattr(payment, "provider_payment_charge_id", None),
+        )
+        grant_premium(uid, plan_key)
+    except Exception as e:
+        log_error(uid, "successful_payment", e)
+        await message.answer(
+            "Платёж успешен, но возникла ошибка активации. "
+            "Не оплачивай повторно — напиши в /paysupport."
+        )
+        return
+
+    await message.answer(
+        "✅ Оплата прошла успешно!\n\n"
+        f"Тариф: {plan['label']}\n"
+        f"Списано: {plan['stars']} ⭐\n"
+        f"{premium_text(uid)}"
+    )
+
+@router.message(Command("paysupport"))
+async def pay_support(message: Message):
+    contact = PAY_SUPPORT_CONTACT or "администратору бота"
+    await message.answer(
+        "💳 Поддержка по оплате\n\n"
+        f"Связь: {contact}\n\n"
+        "Если платёж прошёл, но Premium не появился, "
+        "не оплачивай второй раз. Сообщи дату платежа и свой Telegram ID: "
+        f"{message.from_user.id}"
+    )
+
 
 # -----------------------------
 # MODES / CLASS
@@ -1190,7 +1481,8 @@ async def profile(message: Message):
         f"Фото разобрано: {stat.photos}\n"
         f"Верных проверок: {stat.correct_checks}\n"
         f"Ошибочных ответов: {stat.wrong_checks}\n"
-        f"Избранных задач: {fav_count}"
+        f"Избранных задач: {fav_count}\n"
+        f"{premium_text(uid)}"
     )
     weak = weak_topics(uid, 3)
     if weak:
@@ -1305,6 +1597,9 @@ async def train_topic_callback(callback: CallbackQuery):
 
 @router.message(F.text == "📉 Слабые темы")
 async def weak_topics_handler(message: Message):
+    if not require_premium_flag(message.from_user.id):
+        await message.answer("💎 Статистика слабых тем доступна в Premium.", reply_markup=PREMIUM_KB)
+        return
     rows = weak_topics(message.from_user.id, 6)
     if not rows:
         await message.answer(
@@ -1323,6 +1618,9 @@ async def weak_topics_handler(message: Message):
 
 @router.message(F.text == "🧪 Вариант ОГЭ/ЕГЭ")
 async def exam_menu(message: Message):
+    if not require_premium_flag(message.from_user.id):
+        await message.answer("💎 Полные варианты ОГЭ/ЕГЭ доступны в Premium.", reply_markup=PREMIUM_KB)
+        return
     set_pending(message.from_user.id, "choose_exam_type")
     await message.answer("Выбери экзамен:", reply_markup=EXAM_TYPE_KB)
 
@@ -1378,6 +1676,9 @@ async def solve_photo_mode(message: Message):
 
 @router.message(F.text == "✅ Проверить решение")
 async def check_photo_mode(message: Message):
+    if not require_premium_flag(message.from_user.id):
+        await message.answer("💎 Проверка решения по фото доступна в Premium.", reply_markup=PREMIUM_KB)
+        return
     set_pending(message.from_user.id, "awaiting_photo", {"check_solution": True})
     await message.answer(
         "✅ Отправь фото своего решения. Я постараюсь найти первый неверный шаг."
@@ -1508,7 +1809,7 @@ async def text_handler(message: Message):
     if text in {
         "▶️ Старт", "🧮 Математика", "🇷🇺 Русский язык", "🎓 ОГЭ", "🏆 ЕГЭ",
         "📷 Решить по фото", "✅ Проверить решение", "📖 Учиться", "📝 Тренировка",
-        "🧪 Вариант ОГЭ/ЕГЭ", "📉 Слабые темы",
+        "🧪 Вариант ОГЭ/ЕГЭ", "📉 Слабые темы", "💎 Premium",
         "🎒 Выбрать класс", "👤 Профиль", "⭐ Избранное", "📚 История",
         "🧹 Сбросить контекст", "ℹ️ Помощь"
     }:
@@ -1593,6 +1894,50 @@ async def admin_cmd(message: Message):
     )
 
 
+
+@router.message(Command("refund"))
+async def refund_cmd(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("Команда недоступна.")
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) != 3 or not parts[1].isdigit():
+        await message.answer(
+            "Использование:\n/refund USER_ID TELEGRAM_PAYMENT_CHARGE_ID"
+        )
+        return
+
+    user_id = int(parts[1])
+    charge_id = parts[2]
+
+    try:
+        ok = await bot.refund_star_payment(
+            user_id=user_id,
+            telegram_payment_charge_id=charge_id,
+        )
+        if ok:
+            with SessionLocal() as s:
+                row = s.execute(
+                    select(StarPayment).where(
+                        StarPayment.telegram_payment_charge_id == charge_id
+                    )
+                ).scalar_one_or_none()
+                if row:
+                    row.status = "refunded"
+                    s.commit()
+            await message.answer(
+                "✅ Stars возвращены.\n"
+                "Важно: срок Premium автоматически не уменьшается; "
+                "при необходимости скорректируй доступ вручную в БД."
+            )
+        else:
+            await message.answer("Telegram не подтвердил возврат.")
+    except Exception as e:
+        log_error(message.from_user.id, "refund_star_payment", e)
+        await message.answer(f"Ошибка возврата: {type(e).__name__}")
+
+
 # -----------------------------
 # WEB ADMIN
 # -----------------------------
@@ -1641,6 +1986,7 @@ def admin_page(title: str, body: str) -> str:
       <a href='/admin/errors'>Ошибки</a>
       <a href='/admin/topics'>Темы</a>
       <a href='/admin/exams'>Экзамены</a>
+      <a href='/admin/payments'>Платежи</a>
     </nav>{body}</div></body></html>"""
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -1654,6 +2000,12 @@ async def admin_dashboard(_: bool = Depends(require_admin)):
         completed = s.execute(
             select(func.count(ExamSession.id)).where(ExamSession.completed == True)
         ).scalar_one()
+        payment_count = s.execute(
+            select(func.count(StarPayment.id)).where(StarPayment.status == "paid")
+        ).scalar_one()
+        stars_total = s.execute(
+            select(func.sum(StarPayment.stars)).where(StarPayment.status == "paid")
+        ).scalar() or 0
     body = f"""
     <div class='cards'>
       <div class='card'><div class='muted'>Пользователи</div><div class='big'>{users}</div></div>
@@ -1661,6 +2013,8 @@ async def admin_dashboard(_: bool = Depends(require_admin)):
       <div class='card'><div class='muted'>Фото</div><div class='big'>{photos}</div></div>
       <div class='card'><div class='muted'>Ошибки</div><div class='big'>{errors}</div></div>
       <div class='card'><div class='muted'>Варианты</div><div class='big'>{completed}/{exams}</div></div>
+      <div class='card'><div class='muted'>Платежи</div><div class='big'>{payment_count}</div></div>
+      <div class='card'><div class='muted'>Получено Stars</div><div class='big'>{stars_total} ⭐</div></div>
       <div class='card'><div class='muted'>Версия</div><div class='big'>{APP_VERSION}</div></div>
     </div>
     <div class='card'>
@@ -1752,6 +2106,26 @@ async def admin_exams(_: bool = Depends(require_admin)):
     body = """<table><tr><th>ID</th><th>User</th><th>Экзамен</th>
     <th>Предмет</th><th>Баллы</th><th>Завершён</th><th>Время</th></tr>""" + "".join(tr) + "</table>"
     return HTMLResponse(admin_page("Экзамены", body))
+
+
+
+@app.get("/admin/payments", response_class=HTMLResponse)
+async def admin_payments(_: bool = Depends(require_admin)):
+    with SessionLocal() as s:
+        rows = s.execute(
+            select(StarPayment).order_by(StarPayment.id.desc()).limit(300)
+        ).scalars().all()
+    tr = []
+    for p in rows:
+        tr.append(
+            f"<tr><td>{p.id}</td><td>{p.user_id}</td><td>{html.escape(p.plan_key)}</td>"
+            f"<td>{p.stars} ⭐</td><td>{html.escape(p.status)}</td>"
+            f"<td>{html.escape(p.telegram_payment_charge_id[:80])}</td>"
+            f"<td>{p.created_at or ''}</td></tr>"
+        )
+    body = """<table><tr><th>ID</th><th>User</th><th>Тариф</th>
+    <th>Stars</th><th>Статус</th><th>Telegram charge</th><th>Время</th></tr>""" + "".join(tr) + "</table>"
+    return HTMLResponse(admin_page("Платежи", body))
 
 
 # -----------------------------

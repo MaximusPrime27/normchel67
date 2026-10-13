@@ -45,3 +45,8 @@ services:
         value: admin
       - key: ADMIN_WEB_PASSWORD
         sync: false
+
+      - key: PAY_SUPPORT_CONTACT
+        sync: false
+      - key: PREMIUM_GATES_ENABLED
+        value: "true"

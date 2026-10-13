@@ -1,102 +1,72 @@
-# MathSolver V7 Admin Pro
+# MathSolver V8 Stars
 
-Версия V7 добавляет всё, кроме режима учителя и групповых заданий.
+Добавлена оплата Telegram Stars.
 
-## Главное
+## Тарифы
 
-- PostgreSQL-ready база;
-- SQLite остаётся fallback по умолчанию;
-- Groq primary AI;
-- резервный OpenAI-compatible AI;
-- мини-уроки;
-- тренировки;
-- проверка ответов;
-- проверка решения по фото;
-- ОГЭ/ЕГЭ варианты с баллами;
-- слабые темы ученика;
-- профиль и статистика;
-- история;
-- избранное;
-- кэш;
-- журнал ошибок;
-- веб-админка.
+- 30 дней — 100 ⭐
+- 90 дней — 250 ⭐
+- 180 дней — 450 ⭐
+- 360 дней — 900 ⭐
+- Навсегда — 1500 ⭐
 
-## Веб-админка
+Это разовые покупки. Автосписания нет.
 
-Добавь в Render:
+## Что открывает Premium
 
-```text
-ADMIN_WEB_USER=admin
-ADMIN_WEB_PASSWORD=придумай_длинный_пароль
-```
+- проверка решения ученика по фото;
+- полные тренировочные варианты ОГЭ/ЕГЭ;
+- статистика слабых тем.
 
-После Deploy открой:
+Обычное решение задач, русский язык, обучение и тренировки остаются доступными бесплатно.
 
-```text
-https://ТВОЙ-СЕРВИС.onrender.com/admin
-```
+## Telegram команды
 
-Браузер спросит логин и пароль.
+/premium — тарифы и статус Premium  
+/paysupport — поддержка по оплате  
+/status — статус бота и Premium
 
-Разделы:
-- Обзор
-- Пользователи
-- Ошибки
-- Темы
-- Экзамены
+## Новые переменные Render
 
-Никому не передавай ADMIN_WEB_PASSWORD.
+PAY_SUPPORT_CONTACT=@ваш_username
+PREMIUM_GATES_ENABLED=true
 
-## PostgreSQL
+`PAY_SUPPORT_CONTACT` лучше обязательно заполнить настоящим контактом поддержки.
 
-Код уже поддерживает PostgreSQL.
+## Платежи
 
-Если есть внешний PostgreSQL URL, просто замени:
+Бот:
+1. отправляет invoice в валюте XTR;
+2. проверяет pre_checkout_query;
+3. ждёт successful_payment;
+4. сохраняет telegram_payment_charge_id;
+5. только после successful_payment выдаёт Premium.
 
-```text
-DATABASE_URL=sqlite:///data/mathsolver.db
-```
+Один и тот же charge ID повторно не активирует подписку.
 
-на:
+## Админка
 
-```text
-DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME
-```
+В `/admin` добавлены:
+- количество платежей;
+- сумма полученных Stars;
+- раздел «Платежи».
 
-Код менять не нужно.
+Админ-команда возврата:
 
-## Резервный AI
+/refund USER_ID TELEGRAM_PAYMENT_CHARGE_ID
 
-Можно оставить пустым.
+Она вызывает Telegram refundStarPayment.
 
-При необходимости:
+## После Deploy
 
-```text
-FALLBACK_API_BASE=https://provider.example/v1
-FALLBACK_API_KEY=...
-FALLBACK_MODEL=...
-```
-
-Если Groq временно падает, бот попробует резервный сервис.
-
-## Проверка после Deploy
-
-В Telegram:
-
-```text
 /status
-/version
-```
 
-Должно быть:
+Должно показать:
 
-```text
-Версия: V7 Admin Pro
-```
+Версия: V8 Stars
 
-В браузере:
+Затем нажми:
 
-```text
-/health
-/admin
-```
+💎 Premium
+
+Для реального теста выбери самый дешёвый тариф 30 дней — 100 ⭐.
